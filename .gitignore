@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+backend/.env
+backend/runtime/
+*.log
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# pip temp artifacts
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-unpack-*/
+
+# Downloaded media / runtime output
+runtime/
+*.mp4
+*.mkv
+*.webm
+*.part
+
+# Local env
+.env
+.env.local
