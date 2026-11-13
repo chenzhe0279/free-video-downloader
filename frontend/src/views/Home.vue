@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, onMounted } from 'vue'
-import { api, type DownloadMode, type ProbeResult, type TaskMode, type TaskStatus } from '../api/client'
+import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
+import {
+  api,
+  type DownloadMode,
+  type PreviewState,
+  type ProbeResult,
+  type TaskMode,
+  type TaskStatus,
+} from '../api/client'
 import { suggestFilename } from '../utils/format'
 import ResultPanel from '../components/ResultPanel.vue'
 import TaskProgress from '../components/TaskProgress.vue'
@@ -18,9 +25,20 @@ const task = ref<TaskStatus | null>(null)
 const taskTitle = ref('')
 const taskMode = ref<TaskMode>('server')
 const removeWatermark = ref(false)
+const previewStatus = ref<PreviewState>('idle')
+const previewUrl = ref('')
+const previewProgress = ref(0)
+const previewMessage = ref('')
+const previewTaskId = ref('')
 
 let pollTimer: number | undefined
 let autoSavedTask = ''
+let previewTimer: number | undefined
+let previewSeq = 0
+
+const selectedOption = computed(() =>
+  result.value?.options.find((option) => option.id === selectedId.value),
+)
 
 const platforms = [
   'YouTube',
@@ -90,6 +108,142 @@ function stopPolling() {
   }
 }
 
+const PLAYABLE_EXTS = ['mp4', 'webm', 'mov', 'm4v']
+
+function stopPreviewPolling() {
+  if (previewTimer !== undefined) {
+    window.clearTimeout(previewTimer)
+    previewTimer = undefined
+  }
+}
+
+function discardPreviewTask() {
+  const taskId = previewTaskId.value
+  previewTaskId.value = ''
+  if (!taskId) return
+  api.removeTask(taskId).catch(() => {
+    /* 任务可能已过期或已被清理 */
+  })
+}
+
+function previewIdleMessage(): string {
+  const option = selectedOption.value
+  if (!option) return '解析成功后，可在这里直接在线播放视频。'
+  if (option.audio_only) return '音频选项不支持在线预览，请下载后收听。'
+  return `点击播放，在线预览「${option.label}」`
+}
+
+function resetPreview() {
+  previewSeq += 1
+  stopPreviewPolling()
+  discardPreviewTask()
+  previewUrl.value = ''
+  previewStatus.value = 'idle'
+  previewProgress.value = 0
+  previewMessage.value = previewIdleMessage()
+}
+
+function canPlayDirect(option: ProbeResult['options'][number]) {
+  if (!option.progressive || !option.direct_format_id || option.audio_only) return false
+  return PLAYABLE_EXTS.includes((option.ext ?? '').toLowerCase())
+}
+
+function pollPreview(taskId: string, seq: number) {
+  stopPreviewPolling()
+  const tick = async () => {
+    if (seq !== previewSeq) return
+    try {
+      const data = await api.task(taskId)
+      if (seq !== previewSeq) return
+      if (data.status === 'finished') {
+        previewUrl.value = `/api/files/${taskId}?inline=1`
+        previewStatus.value = 'ready'
+        previewProgress.value = 100
+        previewMessage.value = ''
+        return
+      }
+      if (data.status === 'error') {
+        previewStatus.value = 'error'
+        previewMessage.value = data.error || '在线预览准备失败，可以改用「下载到本地」观看'
+        return
+      }
+      previewStatus.value = 'preparing'
+      previewProgress.value = data.progress || 0
+      previewMessage.value =
+        data.status === 'cleaning'
+          ? '正在去水印，完成后自动开始播放…'
+          : data.status === 'processing'
+            ? '正在合并音视频，完成后自动开始播放…'
+            : '正在下载视频以便在线播放…'
+      previewTimer = window.setTimeout(tick, 1000)
+    } catch {
+      /* 网络抖动时继续轮询 */
+      previewTimer = window.setTimeout(tick, 1500)
+    }
+  }
+  void tick()
+}
+
+async function preparePreview(silent = false) {
+  const data = result.value
+  const option = selectedOption.value
+  if (!data || !option) return
+  if (option.audio_only) {
+    previewStatus.value = 'error'
+    previewMessage.value = '音频选项不支持在线预览，请使用「下载到本地」收听'
+    return
+  }
+
+  const seq = ++previewSeq
+  stopPreviewPolling()
+  discardPreviewTask()
+  previewUrl.value = ''
+  previewProgress.value = 0
+  if (!silent) {
+    previewStatus.value = 'preparing'
+    previewMessage.value = canPlayDirect(option)
+      ? '正在获取在线播放地址…'
+      : '正在准备在线预览，高清格式需要先由服务端合并音视频…'
+  }
+
+  try {
+    const res = await api.preview(data.url, option.id)
+    if (seq !== previewSeq) return
+    if (res.mode === 'task' && res.task_id) {
+      previewTaskId.value = res.task_id
+      previewStatus.value = 'preparing'
+      previewProgress.value = 0
+      previewMessage.value = '正在下载并合并音视频，完成后自动开始播放…'
+      pollPreview(res.task_id, seq)
+      return
+    }
+    if (!res.preview_url) throw new Error('未获取到在线播放地址')
+    previewUrl.value = res.preview_url
+    previewStatus.value = 'ready'
+    previewProgress.value = 100
+    previewMessage.value = ''
+  } catch (err) {
+    if (seq !== previewSeq) return
+    if (silent) {
+      previewStatus.value = 'idle'
+      previewMessage.value = previewIdleMessage()
+      return
+    }
+    previewStatus.value = 'error'
+    previewMessage.value = errorText(err)
+  }
+}
+
+function selectOption(id: string) {
+  if (selectedId.value === id) return
+  selectedId.value = id
+  resetPreview()
+  const option = selectedOption.value
+  if (option && !option.audio_only && canPlayDirect(option)) {
+    void preparePreview(true)
+  }
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : '操作失败，请稍后重试'
 }
@@ -101,6 +255,7 @@ async function analyze() {
     return
   }
   stopPolling()
+  resetPreview()
   loading.value = true
   errorMsg.value = ''
   noticeMsg.value = ''
@@ -113,6 +268,11 @@ async function analyze() {
     result.value = data
     selectedId.value = data.options[0]?.id ?? ''
     removeWatermark.value = Boolean(data.watermark?.available)
+    resetPreview()
+    const first = selectedOption.value
+    if (first && !first.audio_only && canPlayDirect(first)) {
+      void preparePreview(true)
+    }
   } catch (err) {
     errorMsg.value = errorText(err)
   } finally {
@@ -270,7 +430,11 @@ onMounted(() => {
   }
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  stopPreviewPolling()
+  discardPreviewTask()
+})
 </script>
 
 <template>
@@ -369,7 +533,12 @@ onBeforeUnmount(stopPolling)
         :busy-option="busyOption"
         :busy-mode="busyMode"
         :remove-watermark="removeWatermark"
-        @select="selectedId = $event"
+        :preview-status="previewStatus"
+        :preview-url="previewUrl"
+        :preview-progress="previewProgress"
+        :preview-message="previewMessage"
+        @select="selectOption"
+        @preview="preparePreview()"
         @server="startServer"
         @local="downloadLocal"
         @direct="directDownload"
