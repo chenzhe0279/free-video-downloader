@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # 频率限制（每分钟）
     probe_rate_limit_per_minute: int = 20
     download_rate_limit_per_minute: int = 30
+    # 在线预览会产生多次 Range 请求，单独给一个更宽松的额度
+    preview_rate_limit_per_minute: int = 120
 
     # 缓存与有效期
     probe_cache_ttl_seconds: int = 1200

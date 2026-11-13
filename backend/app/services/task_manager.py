@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -21,6 +22,9 @@ from app.services.watermark import (
     remove_watermark as apply_watermark_removal,
 )
 from app.utils import build_filename
+
+# 浏览器 <video> 能直接播放的容器；其余（如 B 站低清 flv）需要重新封装
+_PLAYABLE_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v"}
 
 
 @dataclass
@@ -70,6 +74,22 @@ class TaskManager:
     def get(self, task_id: str) -> DownloadTask | None:
         return self._tasks.get(task_id)
 
+    def find_preview(self, url: str, option_id: str, client_ip: str) -> DownloadTask | None:
+        """复用同一 IP 下正在准备或已就绪的预览任务，避免重复合并。"""
+        now = time.time()
+        for task in self._tasks.values():
+            if task.mode != "preview" or task.client_ip != client_ip:
+                continue
+            if task.url != url or task.option_id != option_id or task.status == "error":
+                continue
+            if task.status == "finished":
+                if not task.filepath or task.finished_at is None:
+                    continue
+                if now - task.finished_at >= task.ttl_seconds:
+                    continue
+            return task
+        return None
+
     def all_tasks(self) -> list[DownloadTask]:
         return list(self._tasks.values())
 
@@ -90,6 +110,7 @@ class TaskManager:
             raise MediaError("该视频没有可用的去水印配置")
 
         settings = get_settings()
+        task_mode = mode if mode in ("local", "preview") else "server"
         task = DownloadTask(
             id=uuid.uuid4().hex[:16],
             url=url,
@@ -99,13 +120,15 @@ class TaskManager:
             client_ip=client_ip,
             title=normalized["title"],
             video_id=normalized.get("id") or "",
-            mode="local" if mode == "local" else "server",
+            mode=task_mode,
             option_label=option.get("label"),
             remove_watermark=remove_watermark and not bool(option["audio_only"]),
             direct_url=option.get("direct_url"),
             direct_headers=option.get("headers") or {},
             ttl_seconds=(
-                settings.local_file_ttl_seconds if mode == "local" else settings.file_ttl_seconds
+                settings.local_file_ttl_seconds
+                if task_mode in ("local", "preview")
+                else settings.file_ttl_seconds
             ),
         )
         self._tasks[task.id] = task
@@ -195,6 +218,12 @@ class TaskManager:
                     filepath = str(cleaned)
                     suffix = task.option_label or "原片"
                     task.option_label = f"{suffix} · 无水印"
+
+                # 在线预览：flv 等浏览器不能直接播放的容器重新封装成 MP4（不重编码）
+                if task.mode == "preview" and not task.audio_only:
+                    filepath = await asyncio.to_thread(
+                        self._ensure_playable, filepath, target_dir
+                    )
 
                 size = os.path.getsize(filepath)
                 task.filepath = filepath
@@ -292,6 +321,51 @@ class TaskManager:
     def _download_sync(self, task: DownloadTask, ydl_opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(task.url, download=True)
+
+    def _ensure_playable(self, filepath: str, target_dir: Path) -> str:
+        """把 flv 等容器无损重新封装为 MP4，供浏览器在线播放。"""
+        path = Path(filepath)
+        if path.suffix.lower() in _PLAYABLE_SUFFIXES:
+            return filepath
+        ffmpeg = resolve_ffmpeg()
+        if not ffmpeg:
+            return filepath
+
+        converted = target_dir / "preview.mp4"
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0?",
+            "-map",
+            "0:a?",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(converted),
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=600,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return filepath
+        if result.returncode != 0 or not converted.exists() or converted.stat().st_size == 0:
+            converted.unlink(missing_ok=True)
+            return filepath
+        path.unlink(missing_ok=True)
+        return str(converted)
 
     def _extract_filepath(self, info: dict[str, Any]) -> str | None:
         downloads = info.get("requested_downloads") or []

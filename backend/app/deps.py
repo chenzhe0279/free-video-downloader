@@ -9,6 +9,7 @@ _settings = get_settings()
 
 probe_limiter = SlidingWindowLimiter(_settings.probe_rate_limit_per_minute)
 download_limiter = SlidingWindowLimiter(_settings.download_rate_limit_per_minute)
+preview_limiter = SlidingWindowLimiter(_settings.preview_rate_limit_per_minute)
 
 
 def client_ip(request: Request) -> str:

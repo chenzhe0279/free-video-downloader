@@ -271,7 +271,16 @@ async def resolve_direct(url: str, option_id: str) -> dict[str, Any]:
             for k, v in headers.items()
             if k.lower() in ("user-agent", "referer", "origin", "accept", "accept-language")
         }
-        return {"url": file_url, "headers": safe_headers}
+        return {
+            "url": file_url,
+            "headers": safe_headers,
+            "protocol": target.get("protocol"),
+        }
 
     result = await loop.run_in_executor(None, _run)
-    return {"url": result["url"], "headers": result["headers"], "option": option}
+    return {
+        "url": result["url"],
+        "headers": result["headers"],
+        "protocol": result.get("protocol"),
+        "option": option,
+    }

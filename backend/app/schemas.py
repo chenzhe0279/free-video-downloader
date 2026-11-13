@@ -45,7 +45,8 @@ class ProbeResponse(BaseModel):
 # server：服务端转存（文件保留 1 小时）
 # local：服务端合并/转码后立即传回本机，服务器只做临时中转
 DownloadMode = Literal["server", "direct", "proxy", "local"]
-TaskMode = Literal["server", "local"]
+# preview：只为「在线浏览」准备一个可播放副本，保留时长与「下载到本地」一致
+TaskMode = Literal["server", "local", "preview"]
 
 
 class DownloadRequest(BaseModel):
@@ -92,3 +93,23 @@ class LocalStreamResponse(BaseModel):
     stream_url: str
     filename: str | None = None
     expires_in: int
+
+
+class PreviewRequest(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2048)
+    option_id: str = Field(..., min_length=1, max_length=64)
+
+
+class PreviewResponse(BaseModel):
+    """在线预览地址：
+
+    - proxy：单文件直链，走服务端代理补全防盗链请求头，不落盘；
+    - file：预览副本已在服务端就绪，可直接 Range 播放；
+    - task：音视频分离，需要先由服务端合并，用 task_id 轮询进度。
+    """
+
+    mode: Literal["proxy", "file", "task"]
+    preview_url: str | None = None
+    task_id: str | None = None
+    filename: str | None = None
+    expires_in: int | None = None

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import time
 
@@ -142,7 +142,7 @@ async def get_task(task_id: str) -> TaskStatus:
         expires_in = max(0, int(task.ttl_seconds - (time.time() - task.finished_at)))
     return TaskStatus(
         task_id=task.id,
-        mode="local" if task.mode == "local" else "server",
+        mode=task.mode,  # type: ignore[arg-type]
         status=task.status,  # type: ignore[arg-type]
         progress=task.progress,
         downloaded_bytes=task.downloaded_bytes,

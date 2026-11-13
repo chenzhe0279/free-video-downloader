@@ -12,7 +12,12 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.deps import client_ip, enforce_rate, download_limiter
+from app.deps import (
+    client_ip,
+    download_limiter,
+    enforce_rate,
+    preview_limiter,
+)
 from app.services.task_manager import manager
 
 router = APIRouter(prefix="/api", tags=["stream"])
@@ -48,9 +53,10 @@ class TokenStore:
 token_store = TokenStore()
 
 
-def _content_disposition(filename: str) -> str:
+def _content_disposition(filename: str, inline: bool = False) -> str:
     ascii_fallback = filename.encode("ascii", "ignore").decode() or "video.mp4"
-    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"
 
 
 def _iter_file(path: Path, start: int, length: int) -> Iterator[bytes]:
@@ -66,7 +72,7 @@ def _iter_file(path: Path, start: int, length: int) -> Iterator[bytes]:
 
 
 @router.get("/files/{task_id}", summary="下载服务端已保存的文件（支持断点续传）")
-async def serve_file(task_id: str, request: Request):
+async def serve_file(task_id: str, request: Request, inline: bool = False):
     task = manager.get(task_id)
     if task is None or task.status != "finished" or not task.filepath:
         raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新下载")
@@ -80,7 +86,8 @@ async def serve_file(task_id: str, request: Request):
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     base_headers = {
         "Accept-Ranges": "bytes",
-        "Content-Disposition": _content_disposition(filename),
+        # inline=true 供 <video> 在线播放，避免浏览器把响应当成附件处理
+        "Content-Disposition": _content_disposition(filename, inline=inline),
         "Cache-Control": "no-store",
     }
 
@@ -133,7 +140,16 @@ async def serve_file(task_id: str, request: Request):
 @router.get("/proxy/{token}", summary="代理转发直链（透传 Range 与防盗链请求头）")
 async def proxy_stream(token: str, request: Request):
     enforce_rate(download_limiter, request, "代理下载请求")
+    return await _proxy_response(token, request, inline=False)
 
+
+@router.get("/preview/proxy/{token}", summary="在线预览代理（内联播放，透传 Range）")
+async def preview_proxy_stream(token: str, request: Request):
+    enforce_rate(preview_limiter, request, "预览请求")
+    return await _proxy_response(token, request, inline=True)
+
+
+async def _proxy_response(token: str, request: Request, inline: bool = False):
     entry = token_store.get(token)
     if entry is None:
         raise HTTPException(status_code=404, detail="代理链接已过期，请重新发起下载")
@@ -176,7 +192,7 @@ async def proxy_stream(token: str, request: Request):
     download_name = entry.get("filename") or (
         f"video-{client_ip(request).replace(':', '_')}.mp4"
     )
-    passthrough["Content-Disposition"] = _content_disposition(download_name)
+    passthrough["Content-Disposition"] = _content_disposition(download_name, inline=inline)
     passthrough["Cache-Control"] = "no-store"
 
     async def body() -> AsyncIterator[bytes]:

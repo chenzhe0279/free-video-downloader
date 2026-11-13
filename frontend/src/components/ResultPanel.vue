@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { formatBytes, formatDuration, platformLabel } from '../utils/format'
-import type { DownloadMode, ProbeResult } from '../api/client'
+import { computed } from 'vue'
+import PreviewPlayer from './PreviewPlayer.vue'
+import type { DownloadMode, PreviewState, ProbeResult } from '../api/client'
+import { formatBytes, platformLabel } from '../utils/format'
 
 const props = defineProps<{
   result: ProbeResult
@@ -8,6 +10,10 @@ const props = defineProps<{
   busyOption: string
   busyMode: DownloadMode | ''
   removeWatermark: boolean
+  previewStatus: PreviewState
+  previewUrl: string
+  previewProgress: number
+  previewMessage: string
 }>()
 
 const emit = defineEmits<{
@@ -15,8 +21,13 @@ const emit = defineEmits<{
   (e: 'server', id: string): void
   (e: 'local', id: string): void
   (e: 'direct', id: string): void
+  (e: 'preview'): void
   (e: 'toggle-watermark', value: boolean): void
 }>()
+
+const selectedOption = computed(() =>
+  props.result.options.find((opt) => opt.id === props.selectedId),
+)
 
 function canDirect(opt: ProbeResult['options'][number]) {
   return Boolean(opt.progressive && opt.direct_format_id && !opt.audio_only)
@@ -33,28 +44,20 @@ function onWatermarkChange(event: Event) {
 
 <template>
   <section class="mt-8 card overflow-hidden animate-float-in" id="result">
-    <div class="flex flex-col gap-4 p-5 sm:flex-row">
-      <div class="relative w-full shrink-0 overflow-hidden rounded-xl bg-slate-100 sm:w-56">
-        <img
-          v-if="props.result.thumbnail"
-          :src="props.result.thumbnail"
-          :alt="props.result.title"
-          class="aspect-video w-full object-cover"
-          referrerpolicy="no-referrer"
-        />
-        <div v-else class="grid aspect-video w-full place-items-center text-ink-400">
-          <svg viewBox="0 0 24 24" class="h-10 w-10" fill="currentColor">
-            <path d="M8 5.5v13l11-6.5z" />
-          </svg>
-        </div>
-        <span
-          class="absolute bottom-2 right-2 rounded-md bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white"
-        >
-          {{ formatDuration(props.result.duration) }}
-        </span>
-      </div>
+    <div class="p-5">
+      <PreviewPlayer
+        :poster="props.result.thumbnail"
+        :src="props.previewUrl"
+        :status="props.previewStatus"
+        :progress="props.previewProgress"
+        :message="props.previewMessage"
+        :label="selectedOption?.label ?? ''"
+        :duration="props.result.duration"
+        :disabled="Boolean(selectedOption?.audio_only)"
+        @request-preview="emit('preview')"
+      />
 
-      <div class="min-w-0 flex-1">
+      <div class="mt-4 min-w-0">
         <h2 class="line-clamp-2 text-lg font-bold leading-snug text-ink-900">
           {{ props.result.title }}
         </h2>
@@ -73,14 +76,19 @@ function onWatermarkChange(event: Event) {
           </span>
         </div>
         <p class="mt-3 text-xs leading-relaxed text-ink-400">
-          「下载到本地」由服务端完成音视频合并后立即传回本机，服务器只做临时中转；「服务端转存」会把文件暂存 1 小时，方便换设备或稍后取回。
+          上面的播放器可以直接在线预览当前选中的清晰度：单文件格式边下边播、秒开；音视频分离的高清格式会先由服务端合并，完成后再开始播放。「下载到本地」由服务端完成合并后立即传回本机，服务器只做临时中转；「服务端转存」会把文件暂存 1 小时，方便换设备或稍后取回。
         </p>
       </div>
     </div>
 
     <div class="border-t border-slate-100 px-5 py-4">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p class="text-sm font-semibold text-ink-900">选择清晰度</p>
+        <div>
+          <p class="text-sm font-semibold text-ink-900">选择清晰度</p>
+          <p class="mt-0.5 text-[11px] text-ink-400">
+            选中某个清晰度后，点上方播放器即可在线预览该画质。
+          </p>
+        </div>
         <label
           v-if="props.result.watermark?.available"
           class="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-700"

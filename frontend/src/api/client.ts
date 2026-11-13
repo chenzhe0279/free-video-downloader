@@ -33,7 +33,7 @@ export interface WatermarkInfo {
 
 export type DownloadMode = 'server' | 'direct' | 'proxy' | 'local'
 
-export type TaskMode = 'server' | 'local'
+export type TaskMode = 'server' | 'local' | 'preview'
 
 export type TaskState = 'queued' | 'downloading' | 'processing' | 'cleaning' | 'finished' | 'error'
 
@@ -63,6 +63,16 @@ export interface DownloadResponse {
   expires_in?: number
   file_ttl_seconds?: number
 }
+
+export interface PreviewResponse {
+  mode: 'proxy' | 'file' | 'task'
+  preview_url?: string
+  task_id?: string
+  filename?: string
+  expires_in?: number
+}
+
+export type PreviewState = 'idle' | 'preparing' | 'ready' | 'error'
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -109,6 +119,12 @@ export const api = {
         mode,
         remove_watermark: removeWatermark,
       }),
+    })
+  },
+  preview(url: string, optionId: string) {
+    return request<PreviewResponse>('/api/preview', {
+      method: 'POST',
+      body: JSON.stringify({ url, option_id: optionId }),
     })
   },
   task(taskId: string) {

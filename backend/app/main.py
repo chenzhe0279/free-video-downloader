@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import download, probe, stream
+from app.api import download, preview, probe, stream
 from app.config import get_settings, resolve_ffmpeg
 from app.services.cleanup import cleanup_loop
 
@@ -51,6 +51,7 @@ app.add_middleware(
 )
 
 app.include_router(probe.router)
+app.include_router(preview.router)
 app.include_router(download.router)
 app.include_router(stream.router)
 
