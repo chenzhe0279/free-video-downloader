@@ -7,6 +7,7 @@ from typing import Any
 import yt_dlp
 
 from app.config import get_settings, resolve_ffmpeg
+from app.services.watermark import watermark_info
 
 
 class YtdlpError(Exception):
@@ -135,7 +136,7 @@ def _normalize(info: dict[str, Any], url: str) -> dict[str, Any]:
             options.append({
                 "id": f"{height}p",
                 "label": f"{height}P 清晰",
-                "note": "需合并音视频，仅服务端下载",
+                "note": "音视频分离，服务端合并后直接下载到本机",
                 "height": height,
                 "ext": fmt.get("ext"),
                 "filesize": None,
@@ -189,7 +190,7 @@ def _normalize(info: dict[str, Any], url: str) -> dict[str, Any]:
         options.append({
             "id": "audio",
             "label": "仅音频 (MP3)",
-            "note": "提取音频，服务端处理",
+            "note": "提取音频，服务端转码后下载到本机",
             "height": None,
             "ext": "mp3",
             "filesize": best_audio.get("filesize") or best_audio.get("filesize_approx"),
@@ -219,6 +220,7 @@ def _normalize(info: dict[str, Any], url: str) -> dict[str, Any]:
         "entry_count": info.get("n_entries"),
         "options": options,
         "subtitles": subtitles[:8],
+        "watermark": watermark_info(info.get("id")),
     }
 
 

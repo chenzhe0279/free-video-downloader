@@ -1,22 +1,33 @@
 <script setup lang="ts">
 import { formatBytes, formatDuration, platformLabel } from '../utils/format'
-import type { ProbeResult } from '../api/client'
+import type { DownloadMode, ProbeResult } from '../api/client'
 
 const props = defineProps<{
   result: ProbeResult
   selectedId: string
   busyOption: string
+  busyMode: DownloadMode | ''
+  removeWatermark: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
   (e: 'server', id: string): void
+  (e: 'local', id: string): void
   (e: 'direct', id: string): void
-  (e: 'proxy', id: string): void
+  (e: 'toggle-watermark', value: boolean): void
 }>()
 
 function canDirect(opt: ProbeResult['options'][number]) {
   return Boolean(opt.progressive && opt.direct_format_id && !opt.audio_only)
+}
+
+function isBusy(optId: string) {
+  return props.busyOption === optId
+}
+
+function onWatermarkChange(event: Event) {
+  emit('toggle-watermark', (event.target as HTMLInputElement).checked)
 }
 </script>
 
@@ -62,13 +73,33 @@ function canDirect(opt: ProbeResult['options'][number]) {
           </span>
         </div>
         <p class="mt-3 text-xs leading-relaxed text-ink-400">
-          直链下载不占用服务器空间，速度取决于平台 CDN；服务端转存会把文件先保存到服务器再提供下载，兼容性更好，文件保留 1 小时。
+          「下载到本地」由服务端完成音视频合并后立即传回本机，服务器只做临时中转；「服务端转存」会把文件暂存 1 小时，方便换设备或稍后取回。
         </p>
       </div>
     </div>
 
     <div class="border-t border-slate-100 px-5 py-4">
-      <p class="mb-3 text-sm font-semibold text-ink-900">选择清晰度</p>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm font-semibold text-ink-900">选择清晰度</p>
+        <label
+          v-if="props.result.watermark?.available"
+          class="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-700"
+        >
+          <input
+            type="checkbox"
+            class="h-3.5 w-3.5 accent-amber-600"
+            :checked="props.removeWatermark"
+            @change="onWatermarkChange"
+          />
+          去水印 · 有损重编码
+        </label>
+      </div>
+      <p
+        v-if="props.result.watermark?.available"
+        class="mb-3 rounded-lg bg-amber-50/70 px-3 py-2 text-[11px] leading-relaxed text-amber-700"
+      >
+        已识别：{{ props.result.watermark.label }}。勾选后会在音视频合并完成后重绘水印区域，耗时略长。
+      </p>
       <ul class="space-y-2">
         <li
           v-for="opt in props.result.options"
@@ -116,33 +147,34 @@ function canDirect(opt: ProbeResult['options'][number]) {
             </span>
           </button>
 
-          <div class="flex shrink-0 gap-2">
-            <button
-              v-if="canDirect(opt)"
-              type="button"
-              class="btn-outline px-4 py-2 text-xs"
-              :disabled="props.busyOption === opt.id"
-              @click="emit('direct', opt.id)"
-            >
-              直链下载
-            </button>
-            <button
-              v-if="canDirect(opt)"
-              type="button"
-              class="btn-outline px-4 py-2 text-xs"
-              :disabled="props.busyOption === opt.id"
-              @click="emit('proxy', opt.id)"
-            >
-              代理加速
-            </button>
+          <div class="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
             <button
               type="button"
-              class="btn-primary px-4 py-2 text-xs"
-              :disabled="props.busyOption === opt.id"
-              @click="emit('server', opt.id)"
+              class="btn-primary w-full px-4 py-2 text-xs sm:w-auto"
+              :disabled="isBusy(opt.id)"
+              @click="emit('local', opt.id)"
             >
-              {{ props.busyOption === opt.id ? '处理中…' : '服务端转存' }}
+              {{ isBusy(opt.id) && props.busyMode === 'local' ? '准备中…' : '下载到本地' }}
             </button>
+            <div class="flex items-center justify-center gap-3 text-[11px] text-ink-400">
+              <button
+                v-if="canDirect(opt) && !props.removeWatermark"
+                type="button"
+                class="font-medium transition hover:text-brand-600 disabled:opacity-40"
+                :disabled="isBusy(opt.id)"
+                @click="emit('direct', opt.id)"
+              >
+                {{ isBusy(opt.id) && props.busyMode === 'direct' ? '获取直链中…' : '直链' }}
+              </button>
+              <button
+                type="button"
+                class="font-medium transition hover:text-brand-600 disabled:opacity-40"
+                :disabled="isBusy(opt.id)"
+                @click="emit('server', opt.id)"
+              >
+                {{ isBusy(opt.id) && props.busyMode === 'server' ? '转存中…' : '服务端转存' }}
+              </button>
+            </div>
           </div>
         </li>
       </ul>

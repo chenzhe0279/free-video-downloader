@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatBytes } from '../utils/format'
-import type { TaskStatus } from '../api/client'
+import type { TaskMode, TaskStatus } from '../api/client'
 
 const props = defineProps<{
   task: TaskStatus
   title: string
+  mode: TaskMode
 }>()
 
 const emit = defineEmits<{
@@ -13,6 +14,8 @@ const emit = defineEmits<{
 }>()
 
 const pct = computed(() => Math.max(0, Math.min(100, props.task.progress)))
+
+const isLocal = computed(() => props.mode === 'local')
 
 const stateText = computed(() => {
   switch (props.task.status) {
@@ -22,6 +25,8 @@ const stateText = computed(() => {
       return '正在下载'
     case 'processing':
       return '合并音视频中'
+    case 'cleaning':
+      return '去水印中'
     case 'finished':
       return '已完成'
     case 'error':
@@ -43,11 +48,27 @@ const stateClass = computed(() => {
 })
 
 const isActive = computed(
-  () => props.task.status === 'queued' || props.task.status === 'downloading' || props.task.status === 'processing',
+  () =>
+    props.task.status === 'queued' ||
+    props.task.status === 'downloading' ||
+    props.task.status === 'processing' ||
+    props.task.status === 'cleaning',
 )
 
 const speedText = computed(() => (props.task.speed ? `${formatBytes(props.task.speed)}/s` : '--'))
 const etaText = computed(() => (props.task.eta && props.task.eta > 0 ? `${props.task.eta} 秒` : '--'))
+
+const ttlMinutes = computed(() => {
+  const seconds = props.task.expires_in
+  if (seconds === null || seconds === undefined) return isLocal.value ? 15 : 60
+  return Math.max(1, Math.round(seconds / 60))
+})
+
+const finishedHint = computed(() =>
+  isLocal.value
+    ? `服务器副本将在约 ${ttlMinutes.value} 分钟后自动清理，需要重存请尽快操作`
+    : '文件将在 1 小时后自动清理',
+)
 
 function downloadFile() {
   const href = props.task.download_url
@@ -69,6 +90,9 @@ function downloadFile() {
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
         </svg>
         <span class="truncate">{{ props.title }}</span>
+        <span class="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-600">
+          {{ isLocal ? '下载到本地' : '服务端转存' }}
+        </span>
       </h3>
       <span
         class="shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
@@ -118,6 +142,12 @@ function downloadFile() {
         {{ props.task.error }}
       </p>
 
+      <p v-else-if="isLocal && isActive" class="rounded-lg bg-brand-50 px-3 py-2 text-xs leading-relaxed text-brand-700">
+        {{ props.task.status === 'cleaning'
+          ? '正在去除水印并重新编码，完成后会自动下载到本机，请保持页面打开。'
+          : '合并完成后会自动开始下载到本机，请保持页面打开。' }}
+      </p>
+
       <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
         <button
           v-if="isActive"
@@ -133,10 +163,10 @@ function downloadFile() {
           class="btn-primary w-full py-2.5 text-sm sm:w-auto"
           @click="downloadFile"
         >
-          保存到本地
+          {{ isLocal ? '再次保存到本机' : '保存到本地' }}
         </button>
         <p v-if="props.task.status === 'finished'" class="mt-1 text-center text-[11px] text-ink-400 sm:mt-0 sm:text-right">
-          文件将在 1 小时后自动清理
+          {{ finishedHint }}
         </p>
       </div>
     </div>

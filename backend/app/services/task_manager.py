@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import shutil
 import time
 import uuid
@@ -10,17 +9,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yt_dlp
 
 from app.config import get_settings, resolve_ffmpeg
-from app.services.ytdlp_service import YtdlpError, probe
-
-_SAFE_NAME = re.compile(r"[^\w\-. ()\[\]\u4e00-\u9fa5]+")
-
-
-def _safe_filename(name: str) -> str:
-    cleaned = _SAFE_NAME.sub("_", name).strip(" .")
-    return (cleaned or "video")[:120]
+from app.services import media
+from app.services.media import MediaError
+from app.services.watermark import (
+    WatermarkError,
+    get_profile,
+    remove_watermark as apply_watermark_removal,
+)
+from app.utils import build_filename
 
 
 @dataclass
@@ -32,6 +32,13 @@ class DownloadTask:
     audio_only: bool
     client_ip: str
     title: str = ""
+    video_id: str = ""
+    mode: str = "server"
+    option_label: str | None = None
+    remove_watermark: bool = False
+    direct_url: str | None = None
+    direct_headers: dict[str, str] = field(default_factory=dict)
+    ttl_seconds: int = 3600
     status: str = "queued"
     progress: float = 0.0
     downloaded_bytes: int = 0
@@ -43,6 +50,8 @@ class DownloadTask:
     error: str | None = None
     created_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    # 正在被下载传输的计数：传输期间不能被清理线程删掉文件
+    serving: int = 0
 
 
 class TaskManager:
@@ -65,20 +74,39 @@ class TaskManager:
         return list(self._tasks.values())
 
     # ---- lifecycle ----
-    async def start(self, url: str, option_id: str, client_ip: str) -> DownloadTask:
-        normalized = await probe(url)
+    async def start(
+        self,
+        url: str,
+        option_id: str,
+        client_ip: str,
+        mode: str = "server",
+        remove_watermark: bool = False,
+    ) -> DownloadTask:
+        normalized = await media.probe(url)
         option = next((o for o in normalized["options"] if o["id"] == option_id), None)
         if option is None:
-            raise YtdlpError(f"未找到格式选项：{option_id}")
+            raise MediaError(f"未找到格式选项：{option_id}")
+        if remove_watermark and get_profile(normalized.get("id")) is None:
+            raise MediaError("该视频没有可用的去水印配置")
 
+        settings = get_settings()
         task = DownloadTask(
             id=uuid.uuid4().hex[:16],
             url=url,
             option_id=option_id,
-            selector=option["selector"],
+            selector=option.get("selector", ""),
             audio_only=bool(option["audio_only"]),
             client_ip=client_ip,
             title=normalized["title"],
+            video_id=normalized.get("id") or "",
+            mode="local" if mode == "local" else "server",
+            option_label=option.get("label"),
+            remove_watermark=remove_watermark and not bool(option["audio_only"]),
+            direct_url=option.get("direct_url"),
+            direct_headers=option.get("headers") or {},
+            ttl_seconds=(
+                settings.local_file_ttl_seconds if mode == "local" else settings.file_ttl_seconds
+            ),
         )
         self._tasks[task.id] = task
         self._per_ip[client_ip] = self.active_for_ip(client_ip) + 1
@@ -130,27 +158,58 @@ class TaskManager:
         try:
             async with self._semaphore:
                 task.status = "downloading"
-                info = await asyncio.to_thread(self._download_sync, task, ydl_opts)
-            filepath = self._extract_filepath(info)
-            if not filepath or not os.path.exists(filepath):
-                raise YtdlpError("下载完成但未找到文件")
+                if task.direct_url:
+                    filepath = await asyncio.to_thread(
+                        self._download_direct, task, target_dir
+                    )
+                else:
+                    info = await asyncio.to_thread(self._download_sync, task, ydl_opts)
+                    filepath = self._extract_filepath(info)
+                if not filepath or not os.path.exists(filepath):
+                    raise MediaError("下载完成但未找到文件")
 
-            size = os.path.getsize(filepath)
-            if size > settings.max_file_size_bytes:
-                os.remove(filepath)
-                raise YtdlpError(
-                    f"文件超过大小上限（{size / 1024**3:.2f}GB > "
-                    f"{settings.max_file_size_bytes / 1024**3:.0f}GB）"
+                size = os.path.getsize(filepath)
+                if size > settings.max_file_size_bytes:
+                    os.remove(filepath)
+                    raise MediaError(
+                        f"文件超过大小上限（{size / 1024**3:.2f}GB > "
+                        f"{settings.max_file_size_bytes / 1024**3:.0f}GB）"
+                    )
+
+                if task.remove_watermark and not task.audio_only:
+                    profile = get_profile(task.video_id)
+                    if profile is None:
+                        raise WatermarkError("该视频没有可用的去水印配置")
+                    task.status = "cleaning"
+                    task.progress = 99.0
+                    task.speed = None
+                    task.eta = None
+                    cleaned = target_dir / "clean.mp4"
+                    await asyncio.to_thread(
+                        apply_watermark_removal,
+                        Path(filepath),
+                        cleaned,
+                        profile,
+                    )
+                    Path(filepath).unlink(missing_ok=True)
+                    filepath = str(cleaned)
+                    suffix = task.option_label or "原片"
+                    task.option_label = f"{suffix} · 无水印"
+
+                size = os.path.getsize(filepath)
+                task.filepath = filepath
+                # 磁盘上的名字只用于定位，真正给用户的文件名单独生成（含清晰度、统一扩展名）
+                task.filename = build_filename(
+                    task.title, task.option_label, Path(filepath).suffix or ".mp4"
                 )
-
-            task.filepath = filepath
-            task.filename = _safe_filename(Path(filepath).name)
-            task.total_bytes = size
-            task.downloaded_bytes = size
-            task.progress = 100.0
-            task.status = "finished"
-            task.finished_at = time.time()
-        except YtdlpError as exc:
+                task.total_bytes = size
+                task.downloaded_bytes = size
+                task.progress = 100.0
+                task.status = "finished"
+                task.finished_at = time.time()
+        except WatermarkError as exc:
+            self._fail(task, str(exc), target_dir)
+        except MediaError as exc:
             self._fail(task, str(exc), target_dir)
         except yt_dlp.utils.DownloadError as exc:
             message = str(exc)
@@ -165,6 +224,70 @@ class TaskManager:
                 self._per_ip[task.client_ip] = remaining
             else:
                 self._per_ip.pop(task.client_ip, None)
+
+    def _download_direct(self, task: DownloadTask, target_dir: Path) -> str:
+        """下载解析器给出的直链（抖音等），流式写入任务目录。"""
+        url = task.direct_url
+        if not url:
+            raise MediaError("直链为空")
+        settings = get_settings()
+        path = target_dir / "source.mp4"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            **(task.direct_headers or {}),
+        }
+
+        try:
+            with httpx.Client(
+                follow_redirects=True,
+                timeout=httpx.Timeout(20.0, read=300.0),
+            ) as client:
+                with client.stream("GET", url, headers=headers) as response:
+                    response.raise_for_status()
+                    total = int(response.headers.get("content-length") or 0)
+                    if total and total > settings.max_file_size_bytes:
+                        raise MediaError("文件超过大小上限")
+                    task.total_bytes = total or None
+                    downloaded = 0
+                    started = time.monotonic()
+                    last_report = started
+                    with path.open("wb") as handle:
+                        for chunk in response.iter_bytes(256 * 1024):
+                            if not chunk:
+                                continue
+                            handle.write(chunk)
+                            downloaded += len(chunk)
+                            task.downloaded_bytes = downloaded
+                            now = time.monotonic()
+                            if now - last_report >= 0.5:
+                                elapsed = now - started
+                                speed = downloaded / elapsed if elapsed > 0 else None
+                                task.speed = speed
+                                if total and speed:
+                                    remaining = max(0, total - downloaded)
+                                    task.eta = int(remaining / speed)
+                                    task.progress = min(
+                                        99.0, round(downloaded / total * 100, 2)
+                                    )
+                                last_report = now
+                    task.downloaded_bytes = downloaded
+                    task.speed = None
+                    task.eta = None
+                    if total and downloaded < total:
+                        raise MediaError(f"下载不完整（{downloaded}/{total} 字节）")
+        except httpx.HTTPError as exc:
+            path.unlink(missing_ok=True)
+            raise MediaError(f"直链下载失败：{exc}") from exc
+        except MediaError:
+            path.unlink(missing_ok=True)
+            raise
+
+        if not path.exists() or path.stat().st_size == 0:
+            raise MediaError("直链下载完成但没有文件")
+        return str(path)
 
     def _download_sync(self, task: DownloadTask, ydl_opts: dict[str, Any]) -> dict[str, Any]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -184,14 +307,23 @@ class TaskManager:
         shutil.rmtree(target_dir, ignore_errors=True)
 
     # ---- cleanup ----
+    def begin_serve(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task is not None:
+            task.serving += 1
+
+    def end_serve(self, task_id: str) -> None:
+        task = self._tasks.get(task_id)
+        if task is not None and task.serving > 0:
+            task.serving -= 1
+
     def purge_expired(self) -> int:
-        settings = get_settings()
         now = time.time()
         removed = 0
         for task in list(self._tasks.values()):
-            if task.finished_at is None:
+            if task.finished_at is None or task.serving > 0:
                 continue
-            if now - task.finished_at < settings.file_ttl_seconds:
+            if now - task.finished_at < task.ttl_seconds:
                 continue
             self.discard(task.id)
             removed += 1

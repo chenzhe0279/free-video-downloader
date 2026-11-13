@@ -23,14 +23,23 @@ export interface ProbeResult {
   entry_count: number | null
   options: FormatOption[]
   subtitles: string[]
+  watermark: WatermarkInfo
 }
 
-export type DownloadMode = 'server' | 'direct' | 'proxy'
+export interface WatermarkInfo {
+  available: boolean
+  label: string | null
+}
 
-export type TaskState = 'queued' | 'downloading' | 'processing' | 'finished' | 'error'
+export type DownloadMode = 'server' | 'direct' | 'proxy' | 'local'
+
+export type TaskMode = 'server' | 'local'
+
+export type TaskState = 'queued' | 'downloading' | 'processing' | 'cleaning' | 'finished' | 'error'
 
 export interface TaskStatus {
   task_id: string
+  mode: TaskMode
   status: TaskState
   progress: number
   downloaded_bytes: number
@@ -40,6 +49,7 @@ export interface TaskStatus {
   filename: string | null
   size: number | null
   download_url: string | null
+  expires_in: number | null
   error: string | null
 }
 
@@ -48,8 +58,10 @@ export interface DownloadResponse {
   task_id?: string
   url?: string
   proxy_url?: string
+  stream_url?: string
   filename?: string
   expires_in?: number
+  file_ttl_seconds?: number
 }
 
 const BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -88,10 +100,15 @@ export const api = {
       body: JSON.stringify({ url }),
     })
   },
-  download(url: string, optionId: string, mode: DownloadMode) {
+  download(url: string, optionId: string, mode: DownloadMode, removeWatermark = false) {
     return request<DownloadResponse>('/api/download', {
       method: 'POST',
-      body: JSON.stringify({ url, option_id: optionId, mode }),
+      body: JSON.stringify({
+        url,
+        option_id: optionId,
+        mode,
+        remove_watermark: removeWatermark,
+      }),
     })
   },
   task(taskId: string) {

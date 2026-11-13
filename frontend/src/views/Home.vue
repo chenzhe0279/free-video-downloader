@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted } from 'vue'
-import { api, type ProbeResult, type TaskStatus } from '../api/client'
+import { api, type DownloadMode, type ProbeResult, type TaskMode, type TaskStatus } from '../api/client'
 import { suggestFilename } from '../utils/format'
 import ResultPanel from '../components/ResultPanel.vue'
 import TaskProgress from '../components/TaskProgress.vue'
@@ -13,10 +13,14 @@ const noticeMsg = ref('')
 const result = ref<ProbeResult | null>(null)
 const selectedId = ref('')
 const busyOption = ref('')
+const busyMode = ref<DownloadMode | ''>('')
 const task = ref<TaskStatus | null>(null)
 const taskTitle = ref('')
+const taskMode = ref<TaskMode>('server')
+const removeWatermark = ref(false)
 
 let pollTimer: number | undefined
+let autoSavedTask = ''
 
 const platforms = [
   'YouTube',
@@ -39,8 +43,8 @@ const features = [
   },
   {
     icon: '⚡',
-    title: '双通道下载',
-    desc: '直链加速不占服务器空间，服务端转存兼容受限格式，随时切换。',
+    title: '本地直传',
+    desc: '「下载到本地」由服务端合并音视频后立即传回本机，传输结束即自动清理，不留长期副本。',
   },
   {
     icon: '🎞️',
@@ -57,7 +61,7 @@ const features = [
 const steps = [
   { no: '01', title: '粘贴视频链接', desc: '复制视频页面地址，粘贴到搜索框。' },
   { no: '02', title: '选择清晰度', desc: '查看真实可用的画质与格式，按需挑选。' },
-  { no: '03', title: '一键保存', desc: '直链秒下，或交给服务器转存后取回。' },
+  { no: '03', title: '一键保存', desc: '直链秒下；音视频分离的高清格式由服务端合并后直接传回本机。' },
 ]
 
 const faqs = [
@@ -67,11 +71,11 @@ const faqs = [
   },
   {
     q: '直链下载提示 403 / 无法下载怎么办？',
-    a: '部分平台带防盗链校验，直链会拒绝浏览器直接访问。此时改用「代理加速」或「服务端转存」即可绕过，服务端会补全 Referer 等请求头。',
+    a: '部分平台带防盗链校验，直链会拒绝浏览器直接访问。此时改用「下载到本地」或「服务端转存」即可绕过，服务端会补全 Referer 等请求头。',
   },
   {
     q: '下载的文件能保存多久？',
-    a: '服务端转存的文件默认保留 1 小时，到期自动清理，请及时保存到本地。直链本身通常有数小时有效期。',
+    a: '「下载到本地」的文件合并完成后会立即传回本机，服务器副本约 15 分钟后自动清理；「服务端转存」的文件保留 1 小时，到期自动删除。',
   },
   {
     q: '使用本站会封号吗？',
@@ -102,10 +106,13 @@ async function analyze() {
   noticeMsg.value = ''
   result.value = null
   task.value = null
+  autoSavedTask = ''
+  removeWatermark.value = false
   try {
     const data = await api.probe(target)
     result.value = data
     selectedId.value = data.options[0]?.id ?? ''
+    removeWatermark.value = Boolean(data.watermark?.available)
   } catch (err) {
     errorMsg.value = errorText(err)
   } finally {
@@ -119,7 +126,18 @@ function pollTask(taskId: string) {
     try {
       const data = await api.task(taskId)
       task.value = data
-      if (data.status === 'finished' || data.status === 'error') {
+      taskMode.value = data.mode
+      if (data.status === 'finished') {
+        stopPolling()
+        // 「下载到本地」：合并完成即自动把文件交给浏览器，服务器副本随后自动清理
+        if (data.mode === 'local' && data.download_url && autoSavedTask !== taskId) {
+          autoSavedTask = taskId
+          triggerDownload(data.download_url, data.filename || 'video.mp4')
+          noticeMsg.value = '合并完成，已开始下载到本机，可在浏览器下载列表中查看进度。'
+        }
+        return
+      }
+      if (data.status === 'error') {
         stopPolling()
         return
       }
@@ -134,19 +152,28 @@ function pollTask(taskId: string) {
 async function startServer(optionId: string) {
   if (!result.value) return
   busyOption.value = optionId
+  busyMode.value = 'server'
   errorMsg.value = ''
   noticeMsg.value = ''
   task.value = null
+  autoSavedTask = ''
   try {
-    const res = await api.download(result.value.url, optionId, 'server')
+    const res = await api.download(
+      result.value.url,
+      optionId,
+      'server',
+      removeWatermark.value,
+    )
     if (!res.task_id) throw new Error('任务创建失败')
     const opt = result.value.options.find((o) => o.id === optionId)
+    taskMode.value = 'server'
     taskTitle.value = `${result.value.title} · ${opt?.label ?? optionId}`
     pollTask(res.task_id)
   } catch (err) {
     errorMsg.value = errorText(err)
   } finally {
     busyOption.value = ''
+    busyMode.value = ''
   }
 }
 
@@ -163,39 +190,64 @@ function triggerDownload(href: string, filename: string, newTab = false) {
   anchor.remove()
 }
 
+async function downloadLocal(optionId: string) {
+  if (!result.value) return
+  const opt = result.value.options.find((o) => o.id === optionId)
+  busyOption.value = optionId
+  busyMode.value = 'local'
+  errorMsg.value = ''
+  noticeMsg.value = ''
+  task.value = null
+  autoSavedTask = ''
+  try {
+    const res = await api.download(
+      result.value.url,
+      optionId,
+      'local',
+      removeWatermark.value,
+    )
+    if (res.task_id) {
+      // 音视频分离的高清格式：后端先合并，完成后自动触发浏览器下载
+      taskMode.value = 'local'
+      taskTitle.value = `${result.value.title} · ${opt?.label ?? optionId}`
+      pollTask(res.task_id)
+      noticeMsg.value = removeWatermark.value
+        ? '已开始合并音视频，完成后会自动去水印并下载到本机。'
+        : '已开始合并音视频，完成后会自动下载到本机。'
+      return
+    }
+    if (!res.stream_url) throw new Error('未获取到下载链接')
+    // 单文件格式：代理流直接落到本机，不占服务器存储
+    triggerDownload(
+      res.stream_url,
+      res.filename || suggestFilename(result.value.title, opt?.ext),
+    )
+    noticeMsg.value = '已开始下载到本机，可在浏览器下载列表中查看进度。'
+  } catch (err) {
+    errorMsg.value = errorText(err)
+  } finally {
+    busyOption.value = ''
+    busyMode.value = ''
+  }
+}
+
 async function directDownload(optionId: string) {
   if (!result.value) return
   busyOption.value = optionId
+  busyMode.value = 'direct'
   errorMsg.value = ''
   noticeMsg.value = ''
   try {
     const res = await api.download(result.value.url, optionId, 'direct')
     if (!res.url) throw new Error('未获取到直链')
     const opt = result.value.options.find((o) => o.id === optionId)
-    triggerDownload(res.url, suggestFilename(result.value.title, opt?.ext), true)
-    noticeMsg.value = '已尝试在浏览器中打开直链。若无反应或提示 403，请改用「代理加速」或「服务端转存」。'
+    triggerDownload(res.url, res.filename || suggestFilename(result.value.title, opt?.ext), true)
+    noticeMsg.value = '已尝试在浏览器中打开直链。若无反应或提示 403，请改用「下载到本地」。'
   } catch (err) {
     errorMsg.value = errorText(err)
   } finally {
     busyOption.value = ''
-  }
-}
-
-async function proxyDownload(optionId: string) {
-  if (!result.value) return
-  busyOption.value = optionId
-  errorMsg.value = ''
-  noticeMsg.value = ''
-  try {
-    const res = await api.download(result.value.url, optionId, 'proxy')
-    if (!res.proxy_url) throw new Error('未获取到代理链接')
-    const opt = result.value.options.find((o) => o.id === optionId)
-    triggerDownload(res.proxy_url, suggestFilename(result.value.title, opt?.ext))
-    noticeMsg.value = '代理下载已开始，大文件请耐心等待浏览器写入磁盘。'
-  } catch (err) {
-    errorMsg.value = errorText(err)
-  } finally {
-    busyOption.value = ''
+    busyMode.value = ''
   }
 }
 
@@ -243,7 +295,7 @@ onBeforeUnmount(stopPolling)
           粘贴链接，<span class="text-gradient">3 秒拿到原片</span>
         </h1>
         <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
-          YouTube、Bilibili、抖音、TikTok 等站点一键解析。直链加速与服务端转存双模式，手机电脑都能用。
+          YouTube、Bilibili、抖音、TikTok 等站点一键解析。音视频自动合并后直接下载到本机，也支持服务端暂存，手机电脑都能用。
         </p>
 
         <!-- Search -->
@@ -315,13 +367,16 @@ onBeforeUnmount(stopPolling)
         :result="result"
         :selected-id="selectedId"
         :busy-option="busyOption"
+        :busy-mode="busyMode"
+        :remove-watermark="removeWatermark"
         @select="selectedId = $event"
         @server="startServer"
+        @local="downloadLocal"
         @direct="directDownload"
-        @proxy="proxyDownload"
+        @toggle-watermark="removeWatermark = $event"
       />
 
-      <TaskProgress v-if="task" :task="task" :title="taskTitle" @cancel="cancelTask" />
+      <TaskProgress v-if="task" :task="task" :title="taskTitle" :mode="taskMode" @cancel="cancelTask" />
     </div>
 
     <!-- Features -->

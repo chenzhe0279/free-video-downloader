@@ -81,39 +81,53 @@ async def serve_file(task_id: str, request: Request):
     base_headers = {
         "Accept-Ranges": "bytes",
         "Content-Disposition": _content_disposition(filename),
+        "Cache-Control": "no-store",
     }
 
-    range_header = request.headers.get("range")
-    if range_header:
-        match = _RANGE_RE.match(range_header.strip())
-        if match:
-            start_raw, end_raw = match.groups()
-            start = int(start_raw) if start_raw else 0
-            end = int(end_raw) if end_raw else size - 1
-            end = min(end, size - 1)
-            if start > end or start >= size:
-                raise HTTPException(
-                    status_code=416,
-                    detail="请求范围无效",
-                    headers={"Content-Range": f"bytes */{size}"},
-                )
-            length = end - start + 1
-            return StreamingResponse(
-                _iter_file(path, start, length),
-                status_code=206,
-                media_type=media_type,
-                headers={
-                    **base_headers,
-                    "Content-Range": f"bytes {start}-{end}/{size}",
-                    "Content-Length": str(length),
-                },
-            )
+    # 传输期间禁止清理线程删除文件
+    manager.begin_serve(task_id)
 
-    return StreamingResponse(
-        _iter_file(path, 0, size),
-        media_type=media_type,
-        headers={**base_headers, "Content-Length": str(size)},
-    )
+    def body(start: int, length: int) -> Iterator[bytes]:
+        try:
+            yield from _iter_file(path, start, length)
+        finally:
+            manager.end_serve(task_id)
+
+    try:
+        range_header = request.headers.get("range")
+        if range_header:
+            match = _RANGE_RE.match(range_header.strip())
+            if match:
+                start_raw, end_raw = match.groups()
+                start = int(start_raw) if start_raw else 0
+                end = int(end_raw) if end_raw else size - 1
+                end = min(end, size - 1)
+                if start > end or start >= size:
+                    raise HTTPException(
+                        status_code=416,
+                        detail="请求范围无效",
+                        headers={"Content-Range": f"bytes */{size}"},
+                    )
+                length = end - start + 1
+                return StreamingResponse(
+                    body(start, length),
+                    status_code=206,
+                    media_type=media_type,
+                    headers={
+                        **base_headers,
+                        "Content-Range": f"bytes {start}-{end}/{size}",
+                        "Content-Length": str(length),
+                    },
+                )
+
+        return StreamingResponse(
+            body(0, size),
+            media_type=media_type,
+            headers={**base_headers, "Content-Length": str(size)},
+        )
+    except BaseException:
+        manager.end_serve(task_id)
+        raise
 
 
 @router.get("/proxy/{token}", summary="代理转发直链（透传 Range 与防盗链请求头）")
@@ -159,9 +173,11 @@ async def proxy_stream(token: str, request: Request):
         if value:
             passthrough[header] = value
     passthrough.setdefault("Accept-Ranges", "bytes")
-    passthrough["Content-Disposition"] = _content_disposition(
+    download_name = entry.get("filename") or (
         f"video-{client_ip(request).replace(':', '_')}.mp4"
     )
+    passthrough["Content-Disposition"] = _content_disposition(download_name)
+    passthrough["Cache-Control"] = "no-store"
 
     async def body() -> AsyncIterator[bytes]:
         try:

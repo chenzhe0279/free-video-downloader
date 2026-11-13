@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     # 存储策略：完成后保留时长 / 单文件大小上限
     file_ttl_seconds: int = 3600
+    # 「下载到本地」模式：合并完成后暂存多久（浏览器从这里取走文件，随后自动清理）
+    local_file_ttl_seconds: int = 900
     max_file_size_bytes: int = 2 * 1024**3
 
     # 并发控制

@@ -63,6 +63,7 @@ async def health() -> JSONResponse:
             "ffmpeg": bool(resolve_ffmpeg()),
             "max_file_size_gb": round(settings.max_file_size_bytes / 1024**3, 2),
             "file_ttl_seconds": settings.file_ttl_seconds,
+            "local_file_ttl_seconds": settings.local_file_ttl_seconds,
         }
     )
 

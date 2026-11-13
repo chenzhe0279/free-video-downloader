@@ -22,6 +22,11 @@ class FormatOption(BaseModel):
     audio_only: bool = False
 
 
+class WatermarkInfo(BaseModel):
+    available: bool = False
+    label: str | None = None
+
+
 class ProbeResponse(BaseModel):
     id: str
     url: str
@@ -34,20 +39,26 @@ class ProbeResponse(BaseModel):
     entry_count: int | None = None
     options: list[FormatOption]
     subtitles: list[str] = []
+    watermark: WatermarkInfo = Field(default_factory=WatermarkInfo)
 
 
-DownloadMode = Literal["server", "direct", "proxy"]
+# server：服务端转存（文件保留 1 小时）
+# local：服务端合并/转码后立即传回本机，服务器只做临时中转
+DownloadMode = Literal["server", "direct", "proxy", "local"]
+TaskMode = Literal["server", "local"]
 
 
 class DownloadRequest(BaseModel):
     url: str = Field(..., min_length=8, max_length=2048)
     option_id: str = Field(..., min_length=1, max_length=64)
     mode: DownloadMode = "server"
+    remove_watermark: bool = False
 
 
 class TaskStatus(BaseModel):
     task_id: str
-    status: Literal["queued", "downloading", "processing", "finished", "error"]
+    mode: TaskMode = "server"
+    status: Literal["queued", "downloading", "processing", "cleaning", "finished", "error"]
     progress: float = 0
     downloaded_bytes: int = 0
     total_bytes: int | None = None
@@ -56,6 +67,7 @@ class TaskStatus(BaseModel):
     filename: str | None = None
     size: int | None = None
     download_url: str | None = None
+    expires_in: int | None = None
     error: str | None = None
 
 
@@ -69,5 +81,14 @@ class DirectLinkResponse(BaseModel):
 class ProxyLinkResponse(BaseModel):
     mode: Literal["proxy"]
     proxy_url: str
+    filename: str | None = None
+    expires_in: int
+
+
+class LocalStreamResponse(BaseModel):
+    """单文件格式的「下载到本地」：不落盘，直接由浏览器从代理流式取回。"""
+
+    mode: Literal["local"]
+    stream_url: str
     filename: str | None = None
     expires_in: int
