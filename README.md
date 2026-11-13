@@ -1,6 +1,6 @@
 # 万能视频下载站
 
-一个基于 **FastAPI + yt-dlp** 的网页端视频下载工具：粘贴链接解析清晰度，支持「下载到本地」「服务端转存」「直链」三种交付方式，并可为特定视频配置去水印。
+一个基于 **FastAPI + yt-dlp** 的网页端视频下载工具：粘贴链接解析清晰度，支持「在线预览」「下载到本地」「服务端转存」「直链」四种交付方式，并可为特定视频配置去水印。
 
 > 实现细节、接口说明与验证记录见 [docs/implementation-summary.md](docs/implementation-summary.md)。
 
@@ -9,7 +9,7 @@
 ```
 backend/
   app/                 # 全部后端业务代码
-    api/               # probe / download / stream 路由
+    api/               # probe / preview / download / stream 路由
     services/          # yt-dlp、任务管理、清理、去水印
     data/              # 去水印配置（按视频 ID）
     config.py          # VDS_* 环境变量
@@ -59,6 +59,15 @@ npm install
 npm run dev      # 开发：http://127.0.0.1:5173 ，/api 代理到 8000
 npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 ```
+
+## 在线预览
+
+解析成功后，结果卡片顶部会显示播放器，当前选中的清晰度可以直接在网页里播放：
+
+- **单文件格式**（抖音、YouTube progressive 等）：服务端只做代理并补全 Referer/UA，浏览器边下边播，不落盘、点开即可播放；
+- **音视频分离格式**（B 站高清等）：服务端先下载并合并，播放器显示实时进度，合并完成后自动开始播放；预览副本保留 15 分钟，可拖动进度条（Range）；
+- 预览地址由 `POST /api/preview` 生成，返回 `proxy` / `file` / `task` 三种模式；同一个 IP 的相同清晰度会复用同一份预览副本；
+- 预览不应用去水印，去水印仍只影响「下载到本地」「服务端转存」。
 
 ## 下载方式
 
