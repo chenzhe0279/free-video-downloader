@@ -1,4 +1,6 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import BrandMark from './BrandMark.vue'
+</script>
 
 <template>
   <footer class="border-t border-slate-200/70 bg-white/70 backdrop-blur-md">
@@ -7,11 +9,9 @@
         <div>
           <div class="flex items-center gap-2.5 mb-4">
             <span class="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500">
-              <svg viewBox="0 0 24 24" class="h-4.5 w-4.5 text-white" fill="currentColor">
-                <path d="M8 5.5v13l11-6.5z" />
-              </svg>
+              <BrandMark class="h-5 w-5 text-white" />
             </span>
-            <span class="text-sm font-bold text-ink-900">万能视频下载站</span>
+            <span class="text-sm font-bold text-ink-900">ClipNest</span>
           </div>
           <p class="text-sm text-ink-500 leading-relaxed">
             一个轻量级的网页端视频下载工具，基于 yt-dlp 支持上千个视频平台解析，无需安装任何客户端。
@@ -41,7 +41,7 @@
 
       <div class="mt-12 pt-8 border-t border-slate-100/50 text-center">
         <p class="text-xs text-ink-400">
-          © 2026 万能视频下载站 · 本项目用于学习交流，不为盈利提供下载服务
+          © 2026 ClipNest · 本项目用于学习交流，不为盈利提供下载服务
         </p>
       </div>
     </div>

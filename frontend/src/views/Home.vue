@@ -40,6 +40,8 @@ const summaryTaskId = ref('')
 const AUTO_SUMMARY_KEY = 'vds-auto-summary'
 
 function readAutoSummary(): boolean {
+  // SSR / 构建期预渲染没有 window，按默认开启处理，仅影响静态快照的初始状态
+  if (typeof window === 'undefined') return true
   try {
     return window.localStorage.getItem(AUTO_SUMMARY_KEY) !== 'off'
   } catch {
@@ -542,7 +544,7 @@ onBeforeUnmount(() => {
         </span>
 
         <h1 class="mt-4 text-[34px] font-black leading-[1.15] tracking-tight text-ink-900 text-balance sm:text-5xl">
-          粘贴链接，<span class="text-gradient">3 秒拿到原片</span>
+          <span class="sr-only">ClipNest 万能视频下载总结器 · </span>粘贴链接，<span class="text-gradient">3 秒拿到原片</span>
         </h1>
         <p class="mx-auto mt-3 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
           YouTube、Bilibili、抖音、TikTok 等站点一键解析。音视频自动合并后直接下载到本机，也支持服务端暂存，手机电脑都能用。
@@ -560,6 +562,7 @@ onBeforeUnmount(() => {
                 type="text"
                 inputmode="url"
                 autocomplete="off"
+                aria-label="粘贴视频链接"
                 placeholder="粘贴视频链接，例如 https://www.bilibili.com/video/..."
                 class="w-full bg-transparent py-3 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none"
               />
@@ -692,7 +695,7 @@ onBeforeUnmount(() => {
           :key="item.title"
           class="card p-6 transition hover:-translate-y-0.5 hover:shadow-lift"
         >
-          <span class="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-xl">{{ item.icon }}</span>
+          <span aria-hidden="true" class="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-xl">{{ item.icon }}</span>
           <h3 class="mt-4 text-base font-bold text-ink-900">{{ item.title }}</h3>
           <p class="mt-2 text-sm leading-relaxed text-ink-500">{{ item.desc }}</p>
         </li>

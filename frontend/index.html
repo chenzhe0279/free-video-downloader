@@ -4,12 +4,140 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#2563eb" />
-    <title>万能视频下载站 · 粘贴链接 3 秒拿到原片</title>
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+
+    <!-- TDK：标题 / 描述 / 关键词（占位域名在正式上线前必须替换） -->
+    <title>万能视频下载总结器 - ClipNest | 在线视频解析下载与AI总结</title>
     <meta
       name="description"
-      content="支持 YouTube、Bilibili、抖音、TikTok 等上千个平台的视频解析与下载，直链加速 + 服务端转存双模式，手机电脑都能用。"
+      content="ClipNest 万能视频下载总结器：粘贴链接即可下载 YouTube、Bilibili、抖音、TikTok 等上千个平台的视频，支持高清原片、无水印解析、在线预览、AI 视频总结与字幕下载，手机电脑免安装，立即免费使用。支持思维导图、Markdown 笔记与视频内问答，解析即总结。"
     />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M12 9l12 7-12 7z' fill='white'/%3E%3C/svg%3E" />
+    <meta
+      name="keywords"
+      content="万能视频下载,视频下载器,在线视频解析,B站视频下载,抖音无水印下载,YouTube视频下载,视频AI总结,视频转文字,字幕下载,ClipNest"
+    />
+    <link rel="canonical" href="https://clipnest.example/" />
+
+    <!-- Open Graph（微信 / Facebook / 海外社交分享） -->
+    <meta property="og:site_name" content="ClipNest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="万能视频下载总结器 - ClipNest | 在线视频解析下载与AI总结" />
+    <meta
+      property="og:description"
+      content="粘贴链接即可下载 YouTube、Bilibili、抖音、TikTok 等上千个平台的视频，支持高清原片、AI 视频总结与字幕下载，手机电脑免安装免费使用。"
+    />
+    <meta property="og:url" content="https://clipnest.example/" />
+    <meta property="og:image" content="https://clipnest.example/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="ClipNest · 万能视频下载总结器" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="万能视频下载总结器 - ClipNest | 在线视频解析下载与AI总结" />
+    <meta
+      name="twitter:description"
+      content="粘贴链接即可下载 YouTube、Bilibili、抖音、TikTok 等上千个平台的视频，支持高清原片、AI 视频总结与字幕下载。"
+    />
+    <meta name="twitter:image" content="https://clipnest.example/og-image.png" />
+
+    <!-- 图标 -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233b6bfa%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%238b5cf6%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22url%28%23g%29%22%2F%3E%3Cpath%20d%3D%22M6.5%209.5%2016%2016%206.5%2022.5Z%22%20fill%3D%22%23fff%22%2F%3E%3Cpath%20d%3D%22M23.5%204%2024.7%207.3%2028%208.5%2024.7%209.7%2023.5%2013%2022.3%209.7%2019%208.5%2022.3%207.3Z%22%20fill%3D%22%23fff%22%2F%3E%3Cpath%20d%3D%22M23.5%2015.5v10M20%2022l3.5%203.5L27%2022%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- 结构化数据：WebSite / Organization / SoftwareApplication / FAQPage -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://clipnest.example/#website",
+          "url": "https://clipnest.example/",
+          "name": "ClipNest · 万能视频下载总结器",
+          "description": "在线视频解析下载与 AI 视频总结工具：粘贴链接即可下载，支持思维导图、视频问答与字幕导出。",
+          "inLanguage": "zh-CN",
+          "publisher": { "@id": "https://clipnest.example/#organization" }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://clipnest.example/#organization",
+          "name": "ClipNest",
+          "url": "https://clipnest.example/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://clipnest.example/logo.svg",
+            "width": 512,
+            "height": 512
+          }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://clipnest.example/#application",
+          "name": "ClipNest · 万能视频下载总结器",
+          "url": "https://clipnest.example/",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "Web",
+          "inLanguage": "zh-CN",
+          "description": "网页端在线视频解析下载工具：粘贴链接即可下载 YouTube、Bilibili、抖音、TikTok 等上千个平台的视频，并提供 AI 视频总结、思维导图、视频问答与字幕下载。",
+          "featureList": [
+            "链接解析与真实清晰度选择",
+            "直链、下载到本地、服务端转存、代理加速四种下载方式",
+            "抖音无水印解析与 B 站按视频去水印",
+            "AI 视频总结：TL;DR、章节、要点、概念、文稿",
+            "Markmap 思维导图与 Markdown 笔记导出",
+            "视频内 AI 问答与字幕下载（SRT/VTT/TXT/MD）"
+          ],
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "CNY",
+            "availability": "https://schema.org/InStock",
+            "description": "当前版本全部功能免费体验；会员权益为后续规划。"
+          }
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://clipnest.example/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "为什么有些视频解析失败？",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "常见原因包括：平台要求登录、地区限制、链接已失效，或该站点暂未被解析引擎支持。可以换一个清晰度选项或稍后重试。"
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "直链下载提示 403 / 无法下载怎么办？",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "部分平台带防盗链校验，直链会拒绝浏览器直接访问。此时改用「下载到本地」或「服务端转存」即可绕过，服务端会补全 Referer 等请求头。"
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "下载的文件能保存多久？",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "「下载到本地」的文件合并完成后会立即传回本机，服务器副本约 15 分钟后自动清理；「服务端转存」的文件保留 1 小时，到期自动删除。"
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "使用本站会封号吗？",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "本站不需要登录你的平台账号，也不会替你发请求到已登录的会话，因此不会直接影响账号。请遵守各平台规则，仅下载你有权使用的内容。"
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="app"></div>

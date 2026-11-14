@@ -1,0 +1,7 @@
+# ClipNest · 万能视频下载总结器
+# 构建时会被 scripts/prerender.mjs 按 VITE_SITE_URL 重新生成
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://clipnest.example/sitemap.xml

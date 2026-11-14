@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build",
+    "build": "vite build && node scripts/prerender.mjs && node scripts/check-seo.mjs",
     "preview": "vite preview --host"
   },
   "dependencies": {
+    "@vue/server-renderer": "^3.5.13",
     "dompurify": "^3.4.17",
     "markdown-it": "^15.0.3",
     "markmap-view": "^0.18.13",
