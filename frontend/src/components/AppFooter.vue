@@ -41,7 +41,7 @@ import BrandMark from './BrandMark.vue'
 
       <div class="mt-12 pt-8 border-t border-slate-100/50 text-center">
         <p class="text-xs text-ink-400">
-          © 2026 ClipNest · 本项目用于学习交流，不为盈利提供下载服务
+          © 2026 ClipNest · 内容更新于 2026-11-14 · 本项目用于学习交流，不为盈利提供下载服务
         </p>
       </div>
     </div>

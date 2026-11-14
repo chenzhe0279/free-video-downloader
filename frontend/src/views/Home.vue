@@ -144,6 +144,22 @@ const faqs = [
     q: '使用本站会封号吗？',
     a: '本站不需要登录你的平台账号，也不会替你发请求到已登录的会话，因此不会直接影响账号。请遵守各平台规则，仅下载你有权使用的内容。',
   },
+  {
+    q: 'AI 总结会生成哪些内容？',
+    a: 'TL;DR 一句话总结、章节大纲（带时间戳）、核心要点、关键概念与完整文稿；可导出 Markdown 笔记与思维导图（PNG/SVG），字幕可下载 SRT/VTT/TXT/MD。',
+  },
+  {
+    q: 'AI 问答可靠吗？',
+    a: '问答严格基于该视频的总结内容，视频外或无关问题会被明确拒答，避免编造。',
+  },
+  {
+    q: '视频总结支持哪些视频？',
+    a: '支持有平台字幕或可通过语音识别生成逐字稿的视频；单视频时长上限默认 2 小时。解析成功后自动生成总结，缓存复用不占用额度。',
+  },
+  {
+    q: '收费吗？',
+    a: '当前版本全部功能免费体验；会员权益（更高画质、批量下载、优先通道等）为后续规划，付费能力将在后续版本开放。',
+  },
 ]
 
 function stopPolling() {
@@ -611,6 +627,28 @@ onBeforeUnmount(() => {
             <dd class="mt-0.5 text-base font-bold text-ink-900">92%</dd>
           </div>
         </dl>
+        <p class="mx-auto mt-2 max-w-lg text-center text-[11px] leading-relaxed text-ink-400">
+          站内统计口径：累计解析请求数 · 解析请求平均耗时 · 解析结果中直链可用比例；数据截至 2026-11-14
+        </p>
+      </div>
+    </section>
+
+    <!-- GEO：产品定义块（供 AI 直接摘取） -->
+    <section id="what-is" class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-sm font-semibold uppercase tracking-wider text-brand-700">产品介绍</p>
+        <h2 class="mt-2 text-3xl font-bold tracking-tight text-ink-900 text-balance">什么是万能视频下载总结器？</h2>
+      </div>
+      <div class="mx-auto mt-8 max-w-3xl space-y-4">
+        <p class="text-base leading-relaxed text-ink-700">
+          <strong class="text-ink-900">ClipNest（万能视频下载总结器）是一个网页端在线工具：</strong>粘贴视频链接即可解析并下载
+          YouTube、Bilibili、抖音、TikTok 等上千个平台的视频，免安装、免登录；下载之外还提供 AI
+          视频总结、思维导图、视频问答与字幕下载，帮助快速理解、归档和回看长视频。
+        </p>
+        <p class="text-sm leading-relaxed text-ink-500">
+          解析成功后自动生成 AI 总结：TL;DR、章节大纲（带时间戳）、核心要点、关键概念与完整文稿；问答严格基于总结内容，无关问题拒答；字幕支持
+          SRT/VTT/TXT/MD 导出。
+        </p>
       </div>
     </section>
 
@@ -711,6 +749,138 @@ onBeforeUnmount(() => {
           <p class="mt-1.5 text-sm text-ink-500">{{ step.desc }}</p>
         </li>
       </ul>
+    </section>
+
+    <!-- GEO：下载方式对比表（供「X vs Y」类查询直接摘取） -->
+    <section id="download-methods" class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-sm font-semibold uppercase tracking-wider text-brand-700">下载方式</p>
+        <h2 class="mt-2 text-3xl font-bold tracking-tight text-ink-900 text-balance">四种下载方式对比</h2>
+        <p class="mt-3 text-sm leading-relaxed text-ink-500">
+          直链最快但可能被防盗链拦截；下载到本地自动合并音视频；服务端转存适合换设备取回；代理加速补全请求头。
+        </p>
+      </div>
+      <div class="mt-8 overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/80 shadow-soft">
+        <table class="w-full min-w-[640px] text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200/70 text-xs uppercase tracking-wider text-ink-400">
+              <th class="px-4 py-3 font-semibold">方式</th>
+              <th class="px-4 py-3 font-semibold">原理</th>
+              <th class="px-4 py-3 font-semibold">适合场景</th>
+              <th class="px-4 py-3 font-semibold">注意事项</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-ink-600">
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">直链</td>
+              <td class="px-4 py-3">浏览器直接访问平台 CDN 地址</td>
+              <td class="px-4 py-3">速度最快的场景</td>
+              <td class="px-4 py-3">防盗链平台可能返回 403</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">下载到本地</td>
+              <td class="px-4 py-3">服务端合并音视频后流式传回本机</td>
+              <td class="px-4 py-3">高清 DASH/HLS 分离格式</td>
+              <td class="px-4 py-3">服务器副本约 15 分钟后自动清理</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">服务端转存</td>
+              <td class="px-4 py-3">文件保存在服务器，稍后取回</td>
+              <td class="px-4 py-3">换设备或稍后下载</td>
+              <td class="px-4 py-3">文件保留 1 小时后自动删除</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">代理加速</td>
+              <td class="px-4 py-3">服务端转发直链，补全 Referer/UA</td>
+              <td class="px-4 py-3">防盗链拦截时使用</td>
+              <td class="px-4 py-3">支持 Range，可边下边播</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- GEO：同类工具功能对比（保守口径，附口径说明） -->
+    <section id="comparison" class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
+      <div class="mx-auto max-w-2xl text-center">
+        <p class="text-sm font-semibold uppercase tracking-wider text-brand-700">功能对比</p>
+        <h2 class="mt-2 text-3xl font-bold tracking-tight text-ink-900 text-balance">与同类工具的功能对比</h2>
+        <p class="mt-3 text-sm leading-relaxed text-ink-500">
+          覆盖下载、AI 总结与跨端体验三个维度；对比为同类工具的常见能力概览，具体以各产品实际功能为准。
+        </p>
+      </div>
+      <div class="mt-8 overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/80 shadow-soft">
+        <table class="w-full min-w-[640px] text-left text-sm">
+          <caption class="sr-only">ClipNest 与同类视频下载工具的功能对比</caption>
+          <thead>
+            <tr class="border-b border-slate-200/70 text-xs uppercase tracking-wider text-ink-400">
+              <th scope="col" class="px-4 py-3 font-semibold">功能对比</th>
+              <th scope="col" class="px-4 py-3 font-semibold text-brand-700">ClipNest</th>
+              <th scope="col" class="px-4 py-3 font-semibold">其他在线工具</th>
+              <th scope="col" class="px-4 py-3 font-semibold">桌面下载软件</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-ink-600">
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">支持平台数量</td>
+              <td class="px-4 py-3 font-semibold text-brand-700">1800+</td>
+              <td class="px-4 py-3">多数 10–50</td>
+              <td class="px-4 py-3">多数 100–500</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">AI 视频总结</td>
+              <td class="px-4 py-3 font-semibold text-emerald-600">支持</td>
+              <td class="px-4 py-3">部分支持</td>
+              <td class="px-4 py-3">不支持</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">思维导图生成</td>
+              <td class="px-4 py-3 font-semibold text-emerald-600">支持</td>
+              <td class="px-4 py-3">部分支持</td>
+              <td class="px-4 py-3">不支持</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">字幕下载</td>
+              <td class="px-4 py-3 font-semibold text-brand-700">SRT/VTT/TXT</td>
+              <td class="px-4 py-3">部分支持</td>
+              <td class="px-4 py-3">部分支持</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">抖音无水印下载</td>
+              <td class="px-4 py-3 font-semibold text-emerald-600">支持</td>
+              <td class="px-4 py-3">部分支持</td>
+              <td class="px-4 py-3">通常需登录</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">最高画质</td>
+              <td class="px-4 py-3 font-semibold text-brand-700">4K</td>
+              <td class="px-4 py-3">多数 720p–1080p</td>
+              <td class="px-4 py-3">部分支持 4K</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">无需安装</td>
+              <td class="px-4 py-3 font-semibold text-emerald-600">支持</td>
+              <td class="px-4 py-3">支持</td>
+              <td class="px-4 py-3">不支持</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">手机浏览器可用</td>
+              <td class="px-4 py-3 font-semibold text-emerald-600">支持</td>
+              <td class="px-4 py-3">多数支持</td>
+              <td class="px-4 py-3">不支持</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-semibold text-ink-900">费用</td>
+              <td class="px-4 py-3 font-semibold text-brand-700">当前免费</td>
+              <td class="px-4 py-3">免费/付费</td>
+              <td class="px-4 py-3">多为付费</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mx-auto mt-3 max-w-2xl text-center text-[11px] leading-relaxed text-ink-400">
+        对比为同类工具的常见能力概览，具体功能与画质以各产品官方说明为准；信息整理于 2026-11-14。
+      </p>
     </section>
 
     <!-- Pricing -->

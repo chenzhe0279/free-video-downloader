@@ -1,4 +1,11 @@
 # ClipNest · 万能视频下载总结器
+# AI 爬虫策略：默认允许全部爬虫（含搜索发现类与内容训练类），仅屏蔽接口目录。
+#   搜索发现类（影响 AI 引用）：OAI-SearchBot、ChatGPT-User、PerplexityBot、Perplexity-User、
+#     Claude-SearchBot、Claude-User、meta-webindexer、meta-externalfetcher、Googlebot、Bingbot 等 → 允许
+#   训练类（不影响 AI 搜索引用）：GPTBot、ClaudeBot、meta-externalagent、Google-Extended 等 → 默认允许；
+#     如需退出训练可在下方按爬虫名收紧，例如：
+#       User-agent: GPTBot
+#       Disallow: /
 # 构建时会被 scripts/prerender.mjs 按 VITE_SITE_URL 重新生成
 User-agent: *
 Allow: /

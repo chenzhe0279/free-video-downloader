@@ -29,6 +29,7 @@
 - [需求分析](docs/requirements.md)
 - [实现总结](docs/implementation-summary.md)
 - [SEO 优化与搜索引擎收录（审计 · 实施 · 验证 · 上线清单）](docs/seo-optimization.md)
+- [GEO 优化与 AI 引用（llms.txt · 内容结构化 · 监控运营）](docs/geo-optimization.md)
 - [v0.8 无进度条总结流与等高工作台设计](docs/v0.8-streaming-summary-design.md)
 - [v0.7 同屏工作台与解析即总结设计](docs/v0.7-single-screen-design.md)
 - [v0.6 内容体验增强设计（含竞品调研）](docs/v0.6-content-experience-design.md)

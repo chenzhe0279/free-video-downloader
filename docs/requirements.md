@@ -1,8 +1,8 @@
 # 万能视频下载站 · 需求分析文档
 
 > 版本：v0.8（2026-11-14）
-> 状态：MVP + AI 视频总结 / AI 视频问答 / Markmap 思维导图 / Markdown 笔记阅读 / 导图导出 / 字幕下载 / 同屏工作台 + 解析即总结 / 无进度条总结流 + 等高工作台 / SEO 基础优化 已交付
-> 关联文档：[项目 README](../README.md) · [实现总结](./implementation-summary.md) · [SEO 优化与搜索引擎收录](./seo-optimization.md) · [v0.8 总结流设计](./v0.8-streaming-summary-design.md) · [v0.7 同屏工作台设计](./v0.7-single-screen-design.md) · [v0.6 设计](./v0.6-content-experience-design.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md)
+> 状态：MVP + AI 视频总结 / AI 视频问答 / Markmap 思维导图 / Markdown 笔记阅读 / 导图导出 / 字幕下载 / 同屏工作台 + 解析即总结 / 无进度条总结流 + 等高工作台 / SEO 基础优化 / GEO 优化（AI 引用） 已交付
+> 关联文档：[项目 README](../README.md) · [实现总结](./implementation-summary.md) · [SEO 优化与搜索引擎收录](./seo-optimization.md) · [GEO 优化与 AI 引用](./geo-optimization.md) · [v0.8 总结流设计](./v0.8-streaming-summary-design.md) · [v0.7 同屏工作台设计](./v0.7-single-screen-design.md) · [v0.6 设计](./v0.6-content-experience-design.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md)
 
 ---
 
@@ -25,11 +25,14 @@
 | 等高固定双栏工作台 | ✅ 已完成 | v0.8；≥1024px 两栏视口等高、内部滚动 |
 | 顶栏「升级 Pro」CTA | ✅ 已完成 | v0.8；品牌蓝胶囊，链接会员权益 |
 | SEO 基础优化（TDK/OG/结构化数据/robots/sitemap/静态预渲染） | ✅ 已完成 | 本轮；占位域名 `https://clipnest.example` 待替换，详见 [SEO 文档](./seo-optimization.md) |
+| GEO 优化（llms.txt/llms-full.txt/pricing.md/定义块/对比表/AI 爬虫策略） | ✅ 已完成 | 本轮；详见 [GEO 文档](./geo-optimization.md) |
 | 用户体系、真实支付、批量任务、字幕翻译、视觉理解 | ❌ 未实现 | 规划中 |
 
 > 本轮（2026-11-14）新增：总结生成改为思考态 + SSE 打字机、左右栏等高固定工作台、顶栏「升级 Pro」，以及对应的设计文档、浏览器验收脚本与截图。
 >
 > 同日另行交付 **SEO 优化**（仅前端与文档，后端零改动）：完整 TDK 与关键词、canonical、Open Graph/Twitter Card、JSON-LD 结构化数据（WebSite/Organization/SoftwareApplication/FAQPage）、robots.txt、sitemap.xml、OG 分享图，以及首页静态预渲染（构建期 SSR 注入，浏览器交互不变）；见 [SEO 优化与搜索引擎收录](./seo-optimization.md)。
+>
+> 同日再次交付 **GEO 优化**（仅前端与文档，后端零改动）：面向 ChatGPT、Perplexity、Gemini 与秘塔、豆包、Kimi 等国内外 AI 引擎，新增 llms.txt / llms-full.txt / pricing.md 机器可读文件、首页产品定义块与下载方式对比表、FAQ 扩充至 8 条并同步 FAQPage + HowTo 结构化数据、运营数字口径与日期标注、AI 爬虫访问策略文档化；见 [GEO 优化与 AI 引用](./geo-optimization.md)。
 
 ---
 

@@ -3,10 +3,15 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadEnv } from 'vite'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = resolve(root, 'dist')
+const PLACEHOLDER_SITE = 'https://clipnest.example'
 const failures = []
+
+const env = loadEnv('production', root, '')
+const siteUrl = (process.env.VITE_SITE_URL || env.VITE_SITE_URL || PLACEHOLDER_SITE).trim().replace(/\/+$/, '')
 
 function check(name, condition, detail = '') {
   if (condition) {
@@ -42,8 +47,9 @@ if (ldStart !== -1) {
   }
   if (graph) {
     const types = (graph['@graph'] || []).map((node) => node['@type'])
-    check('JSON-LD 覆盖 WebSite/Organization/SoftwareApplication/FAQPage', ['WebSite', 'Organization', 'SoftwareApplication', 'FAQPage'].every((t) => types.includes(t)), types.join(','))
-    check('FAQ 问答与页面一致（4 条）', graph['@graph'].find((n) => n['@type'] === 'FAQPage')?.mainEntity?.length === 4)
+    check('JSON-LD 覆盖 WebSite/Organization/SoftwareApplication/FAQPage/HowTo', ['WebSite', 'Organization', 'SoftwareApplication', 'FAQPage', 'HowTo'].every((t) => types.includes(t)), types.join(','))
+    check('FAQ 问答与页面一致（8 条）', graph['@graph'].find((n) => n['@type'] === 'FAQPage')?.mainEntity?.length === 8)
+    check('HowTo 步骤与页面一致（3 步）', graph['@graph'].find((n) => n['@type'] === 'HowTo')?.step?.length === 3)
   }
 }
 
@@ -57,6 +63,10 @@ check('预渲染包含支持平台文案', appHtml.includes('支持上千个平�
 check('预渲染 H1 含品牌关键词', appHtml.includes('ClipNest 万能视频下载总结器'))
 check('预渲染 FAQ 可见', appHtml.includes('为什么有些视频解析失败？'))
 check('预渲染含唯一 H1', (appHtml.match(/<h1[\s>]/g) || []).length === 1)
+check('预渲染含产品定义块', appHtml.includes('什么是万能视频下载总结器'))
+check('预渲染含下载方式对比表', appHtml.includes('四种下载方式对比') && appHtml.includes('代理加速'))
+check('预渲染含同类工具功能对比表', appHtml.includes('与同类工具的功能对比') && appHtml.includes('1800+') && appHtml.includes('无需安装'))
+check('预渲染含更新日期标注', appHtml.includes('内容更新于 2026-11-14'))
 
 const robotsPath = resolve(dist, 'robots.txt')
 check('robots.txt 存在', existsSync(robotsPath))
@@ -71,6 +81,24 @@ check('sitemap 包含首页 URL', /<loc>https:\/\/[^<]+\/<\/loc>/.test(sitemap))
 check('sitemap 包含 lastmod', sitemap.includes('<lastmod>'))
 check('OG 图片已生成（1200x630）', existsSync(resolve(root, 'public', 'og-image.png')))
 check('Apple Touch 图标已生成', existsSync(resolve(root, 'public', 'apple-touch-icon.png')))
+check('构建产物站点地址一致（无占位域名残留）', siteUrl === PLACEHOLDER_SITE || !(html + robots + sitemap).includes(PLACEHOLDER_SITE))
+
+// GEO 机器可读文件
+const llmsPath = resolve(dist, 'llms.txt')
+check('llms.txt 存在', existsSync(llmsPath))
+const llms = existsSync(llmsPath) ? readFileSync(llmsPath, 'utf8') : ''
+check('llms.txt 含产品名与关键链接', llms.includes('万能视频下载总结器') && llms.includes('llms-full.txt') && llms.includes('pricing.md'))
+
+const llmsFullPath = resolve(dist, 'llms-full.txt')
+check('llms-full.txt 存在', existsSync(llmsFullPath))
+const llmsFull = existsSync(llmsFullPath) ? readFileSync(llmsFullPath, 'utf8') : ''
+check('llms-full.txt 含对比表与运营数据', llmsFull.includes('四种下载方式对比') && llmsFull.includes('运营数据') && llmsFull.includes('128,436') && llmsFull.includes('同类工具能力对比'))
+
+const pricingPath = resolve(dist, 'pricing.md')
+check('pricing.md 存在', existsSync(pricingPath))
+const pricing = existsSync(pricingPath) ? readFileSync(pricingPath, 'utf8') : ''
+check('pricing.md 含免费与规划档位', pricing.includes('¥0') && pricing.includes('¥19') && pricing.includes('尚未开放'))
+check('GEO 文件无占位域名残留', siteUrl === PLACEHOLDER_SITE || !(llms + llmsFull + pricing).includes(PLACEHOLDER_SITE))
 
 if (failures.length) {
   console.error(`\n[seo] 检查失败 ${failures.length} 项`)
