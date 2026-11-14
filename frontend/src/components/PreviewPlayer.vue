@@ -49,6 +49,22 @@ function onPlayButton() {
 function onVideoPlay() {
   started.value = true
 }
+
+function seekTo(seconds: number) {
+  const el = videoEl.value
+  if (!el) return
+  const duration = Number.isFinite(el.duration) ? el.duration : null
+  const target =
+    duration !== null
+      ? Math.max(0, Math.min(seconds, Math.max(0, duration - 0.25)))
+      : Math.max(0, seconds)
+  el.currentTime = target
+  el.play().catch(() => {
+    /* 浏览器可能拦截自动播放；定位成功即可 */
+  })
+}
+
+defineExpose({ seekTo })
 </script>
 
 <template>

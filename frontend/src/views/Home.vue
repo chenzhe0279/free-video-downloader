@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
+import { computed, ref, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import {
   api,
   type DownloadMode,
@@ -11,6 +11,7 @@ import {
 import { suggestFilename } from '../utils/format'
 import ResultPanel from '../components/ResultPanel.vue'
 import TaskProgress from '../components/TaskProgress.vue'
+import AiSummaryPanel from '../components/AiSummaryPanel.vue'
 import PricingSection from '../components/PricingSection.vue'
 
 const url = ref('')
@@ -30,6 +31,8 @@ const previewUrl = ref('')
 const previewProgress = ref(0)
 const previewMessage = ref('')
 const previewTaskId = ref('')
+const resultPanelRef = ref<{ seekTo: (seconds: number) => void } | null>(null)
+const pendingSeek = ref<number | null>(null)
 
 let pollTimer: number | undefined
 let autoSavedTask = ''
@@ -234,6 +237,36 @@ async function preparePreview(silent = false) {
   }
 }
 
+watch(previewStatus, (status) => {
+  if (status === 'ready' && pendingSeek.value !== null) {
+    const target = pendingSeek.value
+    pendingSeek.value = null
+    if (noticeMsg.value.startsWith('正在准备在线预览')) noticeMsg.value = ''
+    void nextTick(() => {
+      resultPanelRef.value?.seekTo(target)
+    })
+  } else if (status === 'error') {
+    pendingSeek.value = null
+  }
+})
+
+function summarySeek(seconds: number) {
+  const option = selectedOption.value
+  if (!option || option.audio_only) {
+    noticeMsg.value = '当前是音频选项，无法跳转视频预览'
+    return
+  }
+  if (previewStatus.value === 'ready') {
+    resultPanelRef.value?.seekTo(seconds)
+    return
+  }
+  pendingSeek.value = seconds
+  noticeMsg.value = '正在准备在线预览，准备完成后会自动跳到对应时间点…'
+  if (previewStatus.value !== 'preparing') {
+    void preparePreview()
+  }
+}
+
 function selectOption(id: string) {
   if (selectedId.value === id) return
   selectedId.value = id
@@ -434,6 +467,7 @@ onBeforeUnmount(() => {
   stopPolling()
   stopPreviewPolling()
   discardPreviewTask()
+  pendingSeek.value = null
 })
 </script>
 
@@ -528,6 +562,7 @@ onBeforeUnmount(() => {
     <div class="mx-auto max-w-3xl px-4 sm:px-6">
       <ResultPanel
         v-if="result"
+        ref="resultPanelRef"
         :result="result"
         :selected-id="selectedId"
         :busy-option="busyOption"
@@ -546,6 +581,14 @@ onBeforeUnmount(() => {
       />
 
       <TaskProgress v-if="task" :task="task" :title="taskTitle" :mode="taskMode" @cancel="cancelTask" />
+
+      <AiSummaryPanel
+        v-if="result"
+        :key="result.url"
+        :result="result"
+        :seekable="Boolean(selectedOption && !selectedOption.audio_only)"
+        @seek="summarySeek"
+      />
     </div>
 
     <!-- Features -->

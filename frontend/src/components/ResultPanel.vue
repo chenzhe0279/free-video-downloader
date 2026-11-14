@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import PreviewPlayer from './PreviewPlayer.vue'
 import type { DownloadMode, PreviewState, ProbeResult } from '../api/client'
 import { formatBytes, platformLabel } from '../utils/format'
@@ -29,6 +29,12 @@ const selectedOption = computed(() =>
   props.result.options.find((opt) => opt.id === props.selectedId),
 )
 
+const playerRef = ref<{ seekTo: (seconds: number) => void } | null>(null)
+
+defineExpose({
+  seekTo: (seconds: number) => playerRef.value?.seekTo(seconds),
+})
+
 function canDirect(opt: ProbeResult['options'][number]) {
   return Boolean(opt.progressive && opt.direct_format_id && !opt.audio_only)
 }
@@ -46,6 +52,7 @@ function onWatermarkChange(event: Event) {
   <section class="mt-8 card overflow-hidden animate-float-in" id="result">
     <div class="p-5">
       <PreviewPlayer
+        ref="playerRef"
         :poster="props.result.thumbnail"
         :src="props.previewUrl"
         :status="props.previewStatus"

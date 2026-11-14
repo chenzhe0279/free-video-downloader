@@ -9,6 +9,7 @@
     "preview": "vite preview --host"
   },
   "dependencies": {
+    "markmap-view": "^0.18.13",
     "vue": "^3.5.13"
   },
   "devDependencies": {

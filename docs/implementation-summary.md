@@ -1,6 +1,6 @@
 # 视频下载功能实现总结
 
-> 版本：v0.3（2026-11-14）
+> 版本：v0.5（2026-11-14）
 > 关联文档：[需求分析](./requirements.md) · [项目 README](../README.md)
 
 ---
@@ -316,3 +316,53 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 - [在线播放器](../frontend/src/components/PreviewPlayer.vue)
 - [前端结果面板](../frontend/src/components/ResultPanel.vue)
 - [前端进度卡](../frontend/src/components/TaskProgress.vue)
+
+---
+
+## 12. AI 视频总结（v0.4）
+
+> 详细方案与竞品调研见 [AI 视频总结设计文档](./ai-summary-design.md)。
+
+- 新增 `POST /api/summary` 异步任务；`GET /api/summary/{id}` 轮询；`GET /api/summary/{id}/transcript` 按需取文稿；`DELETE /api/summary/{id}` 取消/删除。
+- 逐字稿：平台字幕（VTT/SRT/ASS/Bilibili JSON/YouTube json3）优先；无字幕时 yt-dlp 下载音频 → ffmpeg 按 60 秒分片 → DeepSeek ASR（Ogg Opus，失败回退 16k WAV）。
+- 总结：`deepseek-flash` + JSON Output + `thinking=disabled`；服务端归一化时间戳/章节/要点/思维导图并生成 Markdown。
+- 前端：`AiSummaryPanel.vue` 提供总结/章节/文稿/思维导图/问答五个标签页、进度/取消、复制/下载 Markdown；章节与文稿时间戳可跳转在线预览；思维导图使用 `markmap-view` 渲染，支持彩色分支、根节点胶囊、缩放/拖拽/折叠。
+- 默认限制：单视频 2 小时、每 IP 每天 3 次、并发 2、缓存 6 小时；未配置 `VDS_DEEPSEEK_API_KEY` 时功能禁用，下载/预览不受影响。
+- 现有 `probe/preview/download/stream/task_manager` 等业务逻辑未改，仅增加路由注册、组件挂载和 seek 出口。
+
+### 验证记录
+
+- 后端 `unittest`：AI 总结相关 38 个测试通过（字幕解析、ASR 合并、JSON 归一化、时间戳吸附、Markdown、任务缓存/额度/取消、API 错误映射）；加入问答后总计 62 个。
+- Mock 全链路：真实解析 B站 `BV1s18cziEtw`（68.5 秒）→ 下载音频 → ffmpeg 分片 → Mock ASR/LLM → finished；缓存第二次命中 `cached=true`；`force=true` 重新生成；DELETE 后 404。
+- 真实 DeepSeek 全链路（68.5 秒 B站视频，无平台字幕）：ASR 68.52 秒 / 2 分片（60+8 秒），总结耗时 16.25 秒，3 章节、10 要点、2 概念、4 分支思维导图；时间戳吸附为 0/0/60 秒；ASR 费用估算 ¥0.0148，模型 tokens 2391；缓存复用不重复计费。
+- 真实 DeepSeek 全链路（204 秒抖音视频）：抖音专用解析下载，ASR 204.27 秒 / 4 分片，总结耗时 28.33 秒，4 章节、6 要点、6 概念，时间戳 0/60/120/180 秒；ASR 费用估算 ¥0.0443。
+- 无头 Chrome（B站真实缓存结果）：解析 → 生成总结 → 章节时间戳跳转（点击 1:00 后 `currentTime=60`）→ 文稿 → 思维导图；思维导图已升级为 Markmap 渲染（15 个节点、彩色分支、根节点胶囊），控制台无异常；桌面与 375px 截图见 `runtime/proof/ai-summary-*.png`。
+- 真实输出与状态快照：`runtime/proof/real-summary-v2.md`、`runtime/proof/real-summary-v2-status.json`、`runtime/proof/real-summary-douyin-v2.md`、`runtime/proof/real-summary-douyin-v2-status.json`。
+- 现有 `probe`、`preview`、`health` 回归正常；`npm run build` 通过。
+- 已知限制：ASR 对带背景音乐的独白有少量漏字；平台字幕路径已有解析单测，但本次未找到可用的免登录 B站 CC 字幕样本做真实联调。
+
+---
+
+## 13. 视频内 AI 问答（v0.5）
+
+> 详细方案见 [AI 问答设计文档](./ai-qa-design.md)。
+
+- 新增 `POST /api/summary/{task_id}/ask`，返回 SSE（`status` / `token` / `refusal` / `done` / `error`）。
+- 回答只基于当前 AI 总结（不含逐字稿）；多轮保留最近 3 轮；与视频无关的问题固定拒答；总结未覆盖的细节回复“材料中没有提到”。
+- 先生成相关性 gate（`deepseek-flash` JSON），无关不调用回答模型；相关再用 `stream_chat` 逐 token 输出。
+- 前端新增 `QaChatPanel.vue` 与「问答」标签页；支持逐字渲染、停止、推荐问题、过期重新生成、切换标签保持会话。
+- 新增 `VDS_QA_*` 配置；默认每 IP 每天 30 问、每分钟 10 次；提问会滑动延长总结任务 TTL。
+- 现有总结、预览、下载代码未改，仅增加 QA 路由、流式方法、`touch` 与前端组件。
+
+### 验证记录
+
+- 后端 `unittest`：总计 **62 个测试通过**（含 24 个问答相关：材料构建、历史裁剪、gate、流式客户端、SSE、错误映射）。
+- 真实 DeepSeek 问答（B站 68.5 秒视频总结，任务 `94d0a03ac6304450`）：
+  - 相关：“这个视频的核心内容是什么？”首 token 1.52 秒，总 2.24 秒，111 个 token 事件；
+  - 无关：“今天天气怎么样？”1.61 秒返回 `refusal`，0 个答案 token；
+  - 超纲：“视频里用的什么拍摄设备？”首 token 1.87 秒，回答“材料中没有提到……”；
+  - 多轮：“再展开说说第一点”首 token 2.15 秒，正确引用上文；
+  - 完整事件记录见 `runtime/proof/real-qa-events.json`。
+- 无头 Chrome：问答标签页、逐字增长（innerText 从 416→509→587）、拒答样式、多轮、停止、标签切换保持会话均通过；控制台无异常；截图见 `runtime/proof/ai-qa-*.png`。
+- 现有总结链路与前端构建回归通过。
+- 已知限制：仅基于总结，总结没覆盖的细节无法回答；相关性 gate 可能误判；历史仅当前页面；拒答为固定 SSE 事件而非 token 流。

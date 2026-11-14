@@ -10,9 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import download, preview, probe, stream
+from app.api import download, preview, probe, qa, stream, summary
 from app.config import get_settings, resolve_ffmpeg
 from app.services.cleanup import cleanup_loop
+from app.services.summary.tasks import summary_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("vds")
@@ -25,10 +26,12 @@ async def lifespan(app: FastAPI):
     logger.info("下载目录：%s", settings.download_dir)
     logger.info("ffmpeg：%s", resolve_ffmpeg() or "未找到（高清晰度合并将不可用）")
     task = asyncio.create_task(cleanup_loop(), name="vds-cleanup")
+    summary_manager.start_cleanup()
     try:
         yield
     finally:
         task.cancel()
+        summary_manager.stop_cleanup()
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
@@ -54,6 +57,8 @@ app.include_router(probe.router)
 app.include_router(preview.router)
 app.include_router(download.router)
 app.include_router(stream.router)
+app.include_router(summary.router)
+app.include_router(qa.router)
 
 
 @app.get("/api/health", tags=["meta"], summary="健康检查")

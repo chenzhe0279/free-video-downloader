@@ -74,6 +74,150 @@ export interface PreviewResponse {
 
 export type PreviewState = 'idle' | 'preparing' | 'ready' | 'error'
 
+export type SummaryTaskState =
+  | 'queued'
+  | 'fetching'
+  | 'transcribing'
+  | 'summarizing'
+  | 'finished'
+  | 'error'
+  | 'cancelled'
+
+export type SummaryTranscriptSource = 'subtitle' | 'asr'
+
+export interface SummaryConfig {
+  enabled: boolean
+  provider: string
+  model: string
+  max_duration_seconds: number
+  daily_limit_per_ip: number
+  rate_limit_per_minute: number
+  asr_chunk_seconds: number
+  qa_enabled: boolean
+  qa_daily_limit_per_ip: number
+  qa_rate_limit_per_minute: number
+  qa_max_question_chars: number
+  reason: string | null
+}
+
+export interface MindmapNode {
+  title: string
+  children: MindmapNode[]
+}
+
+export interface SummaryChapter {
+  start_seconds: number
+  end_seconds: number | null
+  title: string
+  summary: string
+  key_points: string[]
+}
+
+export interface SummaryKeyPoint {
+  title: string
+  detail: string
+  timestamp_seconds: number | null
+}
+
+export interface SummaryConcept {
+  term: string
+  explanation: string
+}
+
+export interface SummaryPayload {
+  tldr: string
+  overview: string
+  keywords: string[]
+  chapters: SummaryChapter[]
+  key_points: SummaryKeyPoint[]
+  concepts: SummaryConcept[]
+  mindmap: MindmapNode | null
+  markdown: string
+}
+
+export interface SummaryStats {
+  chunks: number
+  asr_seconds: number
+  transcript_chars: number
+  segments: number
+  model: string
+  elapsed_seconds: number
+  cached: boolean
+  asr_cost_estimate_cny: number | null
+}
+
+export interface SummaryTaskStatus {
+  task_id: string
+  status: SummaryTaskState
+  stage: string
+  progress: number
+  message: string | null
+  title: string
+  duration: number | null
+  platform: string | null
+  thumbnail: string | null
+  uploader: string | null
+  cached: boolean
+  transcript_source: SummaryTranscriptSource | null
+  transcript_language: string | null
+  stats: SummaryStats
+  summary: SummaryPayload | null
+  error: string | null
+  expires_in: number | null
+}
+
+export interface SummaryCreateResponse {
+  task_id: string
+  status: SummaryTaskState
+  cached: boolean
+}
+
+export interface SummaryTranscriptSegment {
+  start_seconds: number
+  end_seconds: number | null
+  text: string
+}
+
+export interface SummaryTranscriptResponse {
+  task_id: string
+  source: SummaryTranscriptSource | null
+  language: string | null
+  segments: SummaryTranscriptSegment[]
+}
+
+export interface QaHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface QaAskRequest {
+  question: string
+  history?: QaHistoryMessage[]
+}
+
+export type QaPhase = 'checking' | 'answering'
+
+export interface QaRefusalEvent {
+  message: string
+  suggestions: string[]
+}
+
+export interface QaTokenEvent {
+  text: string
+}
+
+export interface QaStatusEvent {
+  phase: QaPhase
+}
+
+export interface QaDoneEvent {
+  finish_reason?: string
+}
+
+export interface QaErrorEvent {
+  message: string
+}
+
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -101,6 +245,43 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T
+}
+
+export async function streamSummaryAnswer(
+  taskId: string,
+  payload: QaAskRequest,
+  signal?: AbortSignal,
+): Promise<Response> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE}/api/summary/${taskId}/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw err
+    throw new Error('无法连接服务端，请确认后端已启动')
+  }
+
+  if (!response.ok) {
+    let detail = `请求失败（${response.status}）`
+    try {
+      const payloadData = await response.json()
+      if (payloadData?.detail) {
+        detail =
+          typeof payloadData.detail === 'string'
+            ? payloadData.detail
+            : JSON.stringify(payloadData.detail)
+      }
+    } catch {
+      /* keep default message */
+    }
+    throw new Error(detail)
+  }
+
+  return response
 }
 
 export const api = {
@@ -132,5 +313,23 @@ export const api = {
   },
   removeTask(taskId: string) {
     return request<{ status: string }>(`/api/tasks/${taskId}`, { method: 'DELETE' })
+  },
+  summaryConfig() {
+    return request<SummaryConfig>('/api/summary/config')
+  },
+  createSummary(url: string, force = false) {
+    return request<SummaryCreateResponse>('/api/summary', {
+      method: 'POST',
+      body: JSON.stringify({ url, force }),
+    })
+  },
+  summaryTask(taskId: string) {
+    return request<SummaryTaskStatus>(`/api/summary/${taskId}`)
+  },
+  summaryTranscript(taskId: string) {
+    return request<SummaryTranscriptResponse>(`/api/summary/${taskId}/transcript`)
+  },
+  deleteSummary(taskId: string) {
+    return request<{ status: string }>(`/api/summary/${taskId}`, { method: 'DELETE' })
   },
 }
