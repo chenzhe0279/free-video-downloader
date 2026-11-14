@@ -4,6 +4,26 @@
 
 > 实现细节、接口说明与验证记录见 [docs/implementation-summary.md](docs/implementation-summary.md)。
 
+## 功能总览
+
+| 模块 | 能力 |
+|------|------|
+| 下载 | 链接解析、清晰度选择、下载到本地、服务端转存、直链、代理加速 |
+| 预览 | 单文件边下边播；DASH/HLS 服务端合并后在线播放，支持 Range |
+| 平台适配 | 抖音无水印解析、B站按视频配置去水印 |
+| AI 总结 | 平台字幕优先 / DeepSeek ASR 兜底；TL;DR、章节、要点、概念、文稿、Markdown |
+| AI 问答 | 严格基于总结、相关性 gate、无关拒答、SSE 流式、最近 3 轮多轮对话 |
+| 思维导图 | Markmap 交互式导图：彩色分支、根节点胶囊、缩放/拖拽/折叠 |
+
+> 2026-11-14 本轮新增：AI 视频总结、视频内 AI 问答、Markmap 思维导图、SSE 流式与拒答、62 个后端测试及对应设计文档。
+
+## 文档索引
+
+- [需求分析](docs/requirements.md)
+- [实现总结](docs/implementation-summary.md)
+- [AI 视频总结设计（含竞品调研）](docs/ai-summary-design.md)
+- [AI 视频问答设计](docs/ai-qa-design.md)
+
 ## 目录结构
 
 ```
@@ -86,6 +106,9 @@ npm install
 npm run dev      # 开发：http://127.0.0.1:5173 ，/api 代理到 8000
 npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 ```
+
+- 前端依赖 `vue` + `markmap-view`（思维导图）；`npm install` 会一并安装。
+- 开发模式下 SSE 通过 Vite 代理转发；生产环境由后端直接返回 `text/event-stream`。
 
 ## 在线预览
 
@@ -171,7 +194,7 @@ cd backend
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出、任务缓存/额度/取消、API 错误映射，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py` 与 `tests/qa_browser_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。
+AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出、任务缓存/额度/取消、API 错误映射，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **62 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py` 与 `tests/qa_browser_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。
 
 ## 免责声明
 

@@ -1,8 +1,9 @@
 # AI 视频总结 · 竞品调研与方案设计
 
-> 版本：v0.4（2026-11-14）
+> 版本：v0.5（2026-11-14）
 > 状态：已实施并通过 Mock + 真实 DeepSeek 联调验收
-> 关联文档：[需求分析](./requirements.md) · [下载功能实现总结](./implementation-summary.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
+> 覆盖范围：AI 视频总结 + Markmap 思维导图；视频内 AI 问答见 [AI 问答设计](./ai-qa-design.md)
+> 关联文档：[需求分析](./requirements.md) · [实现总结](./implementation-summary.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
 
 ---
 

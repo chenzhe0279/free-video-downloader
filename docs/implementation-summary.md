@@ -1,7 +1,22 @@
-# 视频下载功能实现总结
+# 万能视频下载站 · 功能实现总结
 
 > 版本：v0.5（2026-11-14）
-> 关联文档：[需求分析](./requirements.md) · [项目 README](../README.md)
+> 关联文档：[需求分析](./requirements.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
+
+---
+
+## 0. 本期新增（v0.5）
+
+2026-11-14 本轮在既有下载/预览/去水印能力上新增：
+
+| 新增能力 | 说明 | 详见 |
+|------|------|------|
+| AI 视频总结 | 平台字幕优先，无字幕时 DeepSeek ASR 60 秒分片；输出 TL;DR、章节、要点、概念、文稿、Markdown | 第 12 节 · [设计文档](./ai-summary-design.md) |
+| 视频内 AI 问答 | 严格基于总结、相关性 gate、无关拒答、SSE token 流式、最近 3 轮多轮对话 | 第 13 节 · [设计文档](./ai-qa-design.md) |
+| Markmap 思维导图 | 用 `markmap-view` 渲染彩色分支、根节点胶囊、缩放/拖拽/折叠 | 第 12 节 |
+| 测试与验收 | 62 个后端测试；Mock/真实 DeepSeek；无头 Chrome 总结/问答/思维导图 | 第 12、13 节 |
+
+> 既有下载主链路（`probe/preview/download/stream/task_manager`）未改；增量改动集中在 `main.py` 注册 AI 路由、新增 `services/summary` 与 `services/qa`、`settings/schemas/deepseek/tasks` 的加法式扩展，以及前端 AI 面板、问答组件、Markmap 和 seek 出口。
 
 ---
 
@@ -36,6 +51,9 @@
 | B 站去水印 | 按视频配置固定区域，ffmpeg `delogo` 有损去除烧录水印 |
 | 进度反馈 | 下载进度、速度、已下载/总大小、剩余时间；合并、去水印阶段单独展示 |
 | 清理 | 本地任务 15 分钟、服务端任务 1 小时后自动清理；传输中的文件不会被清理线程删除 |
+| AI 视频总结 | 平台字幕/DeepSeek ASR → 结构化 TL;DR、章节、要点、概念、文稿、Markdown；缓存与额度控制 |
+| AI 视频问答 | 仅基于总结；相关性 gate + 无关拒答；SSE 流式；最近 3 轮多轮对话 |
+| Markmap 思维导图 | 彩色分支、根节点胶囊、曲线连接、缩放/拖拽/折叠 |
 
 ## 3. 目录与架构
 
@@ -47,6 +65,8 @@ backend/
       preview.py         # 在线预览：代理 / 合并任务 / 内联播放地址
       download.py        # 创建任务 / 直链 / 代理 / 本地
       stream.py          # 文件 Range 下载、代理流、预览代理
+      summary.py         # AI 总结任务 / 配置 / 文稿
+      qa.py              # AI 问答 SSE 路由
     services/
       media.py           # 平台调度：抖音专用 / 其他平台 yt-dlp
       douyin.py          # 抖音 ttwid、分享页 SSR、无水印地址、WAF 兜底
@@ -54,12 +74,15 @@ backend/
       task_manager.py    # 任务、下载、合并、去水印、TTL、传输保护
       watermark.py       # 按视频配置的 delogo 去水印
       cleanup.py         # 过期任务/孤儿目录清理
+      summary/           # 逐字稿、DeepSeek ASR/总结、任务与缓存
+      qa/                # 总结材料、相关性 gate、SSE 流式问答
     data/
       watermark_profiles.json
     schemas.py
     config.py
     security.py
     utils.py             # 安全文件名、下载文件名
+  tests/                 # 单元测试 / Mock DeepSeek / 浏览器验收脚本
   pyproject.toml
   uv.lock
   .python-version
@@ -70,10 +93,15 @@ frontend/
     components/ResultPanel.vue
     components/PreviewPlayer.vue
     components/TaskProgress.vue
+    components/AiSummaryPanel.vue   # AI 总结 / 问答容器
+    components/QaChatPanel.vue      # 流式问答面板
+    components/MindmapTree.vue      # Markmap 思维导图
     utils/format.ts
 docs/
   requirements.md
   implementation-summary.md
+  ai-summary-design.md
+  ai-qa-design.md
 runtime/                 # 运行时下载、验证产物（gitignore，不放代码）
 ```
 
@@ -95,6 +123,15 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
        ├─ mode=server  ──► task_manager → /api/files/{id}
        ├─ mode=direct  ──► resolve_direct 返回平台直链
        └─ mode=proxy   ──► token_store → /api/proxy/{token}
+
+  └─ POST /api/summary ──► summary_manager
+       ├─ 字幕优先 / DeepSeek ASR 分片
+       ├─ deepseek-flash JSON 结构化总结
+       └─ 缓存 + TTL；GET /api/summary/{id} 轮询
+
+  └─ POST /api/summary/{id}/ask ──► qa (SSE)
+       ├─ 相关性 gate（无关 → refusal）
+       └─ stream_chat（逐 token → token 事件）→ done
 ```
 
 ## 4. 关键实现
@@ -300,20 +337,31 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 - 任务持久化与多进程/队列支持。
 - 可选登录态（用户自愿提供 Cookie）以获取更高清晰度。
 - 去水印区域的可视化框选，而不是手工维护 JSON。
-- 自动化测试：URL 解析、分享页 JSON 解析、任务状态机、Range 下载。
+- AI 追问增强：逐字稿检索（RAG）、答案时间戳点击跳转、对话历史持久化。
+- AI 总结增强：字幕翻译、画面视觉理解、Markmap 导出 PNG/SVG。
+- 自动化测试扩展：真实平台的 Range/直链回归、更多长视频样本。
 
 ## 11. 相关文件
 
 - [需求文档](./requirements.md)
+- [AI 总结设计](./ai-summary-design.md)
+- [AI 问答设计](./ai-qa-design.md)
 - [README](../README.md)
 - [预览接口](../backend/app/api/preview.py)
 - [流与代理](../backend/app/api/stream.py)
+- [总结接口](../backend/app/api/summary.py)
+- [问答 SSE 接口](../backend/app/api/qa.py)
+- [总结任务管理](../backend/app/services/summary/tasks.py)
+- [问答服务](../backend/app/services/qa/service.py)
 - [抖音解析](../backend/app/services/douyin.py)
 - [平台调度](../backend/app/services/media.py)
 - [任务管理](../backend/app/services/task_manager.py)
 - [去水印](../backend/app/services/watermark.py)
 - [水印配置](../backend/app/data/watermark_profiles.json)
 - [在线播放器](../frontend/src/components/PreviewPlayer.vue)
+- [AI 总结 / 问答面板](../frontend/src/components/AiSummaryPanel.vue)
+- [流式问答组件](../frontend/src/components/QaChatPanel.vue)
+- [Markmap 思维导图](../frontend/src/components/MindmapTree.vue)
 - [前端结果面板](../frontend/src/components/ResultPanel.vue)
 - [前端进度卡](../frontend/src/components/TaskProgress.vue)
 

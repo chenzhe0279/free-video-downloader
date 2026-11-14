@@ -2,7 +2,7 @@
 
 > 版本：v0.5（2026-11-14）
 > 状态：已实施并通过 Mock + 真实 DeepSeek 流式/拒答/多轮验收
-> 关联文档：[AI 视频总结设计](./ai-summary-design.md) · [需求分析](./requirements.md) · [项目 README](../README.md)
+> 关联文档：[AI 视频总结设计](./ai-summary-design.md) · [需求分析](./requirements.md) · [实现总结](./implementation-summary.md) · [项目 README](../README.md)
 
 ---
 
