@@ -11,16 +11,19 @@
 | 下载 | 链接解析、清晰度选择、下载到本地、服务端转存、直链、代理加速 |
 | 预览 | 单文件边下边播；DASH/HLS 服务端合并后在线播放，支持 Range |
 | 平台适配 | 抖音无水印解析、B站按视频配置去水印 |
-| AI 总结 | 平台字幕优先 / DeepSeek ASR 兜底；TL;DR、章节、要点、概念、文稿、Markdown |
+| AI 总结 | 平台字幕优先 / DeepSeek ASR 兜底；TL;DR、章节、要点、概念、文稿、Markdown 笔记 |
+| 笔记阅读 | Markdown 精排版：目录、标题层级、引用、列表、表格、可点击时间戳；可切回卡片视图 |
 | AI 问答 | 严格基于总结、相关性 gate、无关拒答、SSE 流式、最近 3 轮多轮对话 |
-| 思维导图 | Markmap 交互式导图：彩色分支、根节点胶囊、缩放/拖拽/折叠 |
+| 思维导图 | Markmap 交互式导图：彩色分支、根节点胶囊、缩放/拖拽/折叠、全屏、导出 PNG/SVG |
+| 字幕下载 | 总结完成后下载 SRT / VTT / TXT / Markdown 字幕，平台字幕与 ASR 逐字稿都支持 |
 
-> 2026-11-14 本轮新增：AI 视频总结、视频内 AI 问答、Markmap 思维导图、SSE 流式与拒答、62 个后端测试及对应设计文档。
+> 2026-11-14 本轮新增：Markdown 笔记精排版、思维导图全屏与高清导出、字幕文件下载。
 
 ## 文档索引
 
 - [需求分析](docs/requirements.md)
 - [实现总结](docs/implementation-summary.md)
+- [v0.6 内容体验增强设计（含竞品调研）](docs/v0.6-content-experience-design.md)
 - [AI 视频总结设计（含竞品调研）](docs/ai-summary-design.md)
 - [AI 视频问答设计](docs/ai-qa-design.md)
 
@@ -107,8 +110,9 @@ npm run dev      # 开发：http://127.0.0.1:5173 ，/api 代理到 8000
 npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 ```
 
-- 前端依赖 `vue` + `markmap-view`（思维导图）；`npm install` 会一并安装。
+- 前端依赖 `vue` + `markmap-view`（思维导图）+ `markdown-it` + `dompurify`（Markdown 笔记渲染）；`npm install` 会一并安装。
 - 开发模式下 SSE 通过 Vite 代理转发；生产环境由后端直接返回 `text/event-stream`。
+- 如果 npm 全局缓存目录不可写，可加 `--cache ..\runtime\npm-cache` 安装。
 
 ## 在线预览
 
@@ -125,8 +129,8 @@ npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 
 1. **逐字稿**：优先下载平台字幕（VTT/SRT/ASS/Bilibili JSON/YouTube json3）；没有字幕时下载音频，按 60 秒分片调用 DeepSeek ASR；
 2. **结构化总结**：`deepseek-flash` 输出 JSON，服务端校验时间戳、章节、要点，并生成 Markdown；
-3. **前端展示**：总结 / 章节 / 文稿 / 思维导图 / 问答五个标签页；章节和文稿时间戳可跳转到在线预览播放器；思维导图使用 `markmap-view` 渲染，支持彩色分支、缩放、拖拽和节点折叠；
-4. **导出**：复制 Markdown 或下载 `.md` 笔记。
+3. **前端展示**：总结 / 章节 / 文稿 / 思维导图 / 问答五个标签页；总结页默认渲染 Markdown 笔记（目录、标题层级、引用、列表、表格、可点击时间戳），可一键切回卡片视图；章节和文稿时间戳可跳转到在线预览播放器；思维导图使用 `markmap-view` 渲染，支持彩色分支、缩放、拖拽、节点折叠、全屏和 PNG/SVG 导出；
+4. **导出**：复制 Markdown、下载 `.md` 笔记；文稿页可下载 SRT / VTT / TXT / Markdown 字幕。
 
 限制与行为：
 
@@ -137,7 +141,22 @@ npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 - 任务与缓存都在内存中，重启后端后丢失；临时音频在任务结束后立即删除；
 - 只向 DeepSeek 发送音频分片与逐字稿文本，不发送视频文件、不保存用户 Cookie。
 
-接口：`GET /api/summary/config`、`POST /api/summary`、`GET /api/summary/{id}`、`GET /api/summary/{id}/transcript`、`DELETE /api/summary/{id}`。
+接口：`GET /api/summary/config`、`POST /api/summary`、`GET /api/summary/{id}`、`GET /api/summary/{id}/transcript`、`GET /api/summary/{id}/subtitles`、`DELETE /api/summary/{id}`。
+
+### Markdown 笔记与字幕下载
+
+- 总结页默认显示 Markdown 笔记视图：由后端 `build_markdown()` 生成，前端用 `markdown-it` 渲染、`DOMPurify` 消毒；h2/h3 生成目录，`[00:00](#t=0)` 形式的时间戳可点击跳转；
+- 可切换到卡片视图（TL;DR / 要点 / 概念），偏好保存在浏览器本地；
+- 文稿页选择 SRT / VTT / TXT / Markdown 后下载字幕文件，文件名形如 `视频标题-字幕-平台字幕.srt`；
+- 字幕由总结任务中的 `segments` 生成；ASR 字幕时间戳约为 1 分钟粒度，平台字幕使用原始时间；
+- 字幕下载不产生 AI 费用，任务过期（默认 30 分钟）后返回 404。
+
+### 思维导图导出
+
+- 内联高度 600px，支持页面内全屏（ESC 退出、自动锁定页面滚动）；
+- 工具栏提供“适应屏幕 / 展开全部 / PNG 2x / PNG 3x / SVG”；
+- PNG 在浏览器端由 SVG + Canvas 生成，Chrome/Edge 可正常导出；Safari 对 `foreignObject` 支持不稳定，失败时会提示改用 SVG；
+- 导出的是当前展开的分支；需要完整图时先点“展开全部”。
 
 ## 视频内 AI 问答
 
@@ -194,7 +213,7 @@ cd backend
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出、任务缓存/额度/取消、API 错误映射，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **62 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py` 与 `tests/qa_browser_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。
+AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出与转义、字幕文件导出（SRT/VTT/TXT/MD 与 404/409/422）、任务缓存/额度/取消、API 错误映射，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **95 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py`、`tests/qa_browser_e2e.py` 与 `tests/content_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。
 
 ## 免责声明
 

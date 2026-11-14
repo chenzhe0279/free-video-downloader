@@ -43,6 +43,140 @@
   .vip-cta {
     @apply inline-flex items-center justify-center rounded-full border border-transparent px-7 py-3 text-base font-semibold text-white bg-gradient-to-r from-accent-500 via-accent-600 to-accent-600 shadow-[0_8px_16px_-4px_rgba(234,88,12,0.4)] hover:from-accent-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/40 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition-transform;
   }
+
+  /* ===== Markdown 笔记阅读视图（MarkdownNote.vue） ===== */
+  .md-body {
+    @apply min-w-0 break-words text-[15px] leading-[1.85] text-ink-700 md:text-[16px] md:leading-[1.85];
+  }
+  .md-body > :first-child {
+    @apply mt-0;
+  }
+  .md-body > :last-child {
+    @apply mb-0;
+  }
+
+  /* 标题：h1 文档标题、h2 章节、h3 小节；均留出吸顶导航的滚动偏移 */
+  .md-body h1,
+  .md-body h2,
+  .md-body h3,
+  .md-body h4,
+  .md-body h5,
+  .md-body h6 {
+    @apply scroll-mt-24 font-semibold tracking-tight text-ink-900;
+  }
+  .md-body h1 {
+    @apply mb-4 mt-2 border-b border-slate-100 pb-3 text-xl font-bold md:text-2xl;
+  }
+  .md-body h2 {
+    @apply mb-3 mt-7 border-l-[3px] border-brand-300 pl-3 text-lg font-semibold md:text-xl;
+  }
+  .md-body h3 {
+    @apply mb-2 mt-5 text-base font-semibold;
+  }
+  .md-body h4 {
+    @apply mb-2 mt-4 text-[15px] font-semibold;
+  }
+
+  .md-body p {
+    @apply my-3;
+  }
+  .md-body strong {
+    @apply font-semibold text-ink-900;
+  }
+  .md-body em {
+    @apply italic;
+  }
+  .md-body del {
+    @apply text-ink-400;
+  }
+
+  /* 链接：正文链接走品牌色；时间戳单独做成可点击胶囊 */
+  .md-body a {
+    @apply font-medium text-brand-600 underline decoration-brand-200 underline-offset-2 transition hover:text-brand-700 hover:decoration-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
+  }
+  .md-body .md-timestamp {
+    @apply ml-0.5 inline-flex items-center gap-1 rounded-md border border-brand-100 bg-brand-50 px-1.5 py-0.5 align-baseline text-[0.8em] font-semibold leading-none text-brand-600 no-underline tabular-nums transition hover:border-brand-300 hover:bg-brand-100 hover:text-brand-700;
+  }
+  .md-body .md-timestamp::before {
+    content: '▶';
+    @apply text-[0.6em] opacity-70;
+  }
+  .md-body .md-timestamp--disabled {
+    @apply cursor-not-allowed border-slate-200 bg-slate-100 text-ink-400 hover:border-slate-200 hover:bg-slate-100 hover:text-ink-400;
+  }
+
+  /* 引用：元信息、免责声明和需要强调的摘录 */
+  .md-body blockquote {
+    @apply my-4 rounded-r-lg border-l-[3px] border-brand-200 bg-brand-50/60 px-4 py-2.5 text-ink-600;
+  }
+  .md-body blockquote > :first-child {
+    @apply mt-0;
+  }
+  .md-body blockquote > :last-child {
+    @apply mb-0;
+  }
+  .md-body blockquote p {
+    @apply my-1;
+  }
+
+  /* 列表 */
+  .md-body ul {
+    @apply my-3 list-disc pl-5;
+  }
+  .md-body ol {
+    @apply my-3 list-decimal pl-5;
+  }
+  .md-body li {
+    @apply my-1 pl-0.5;
+  }
+  .md-body li > p {
+    @apply my-1;
+  }
+  .md-body li > ul,
+  .md-body li > ol {
+    @apply my-1;
+  }
+  .md-body li::marker {
+    @apply text-brand-300;
+  }
+  .md-body ol > li::marker {
+    @apply font-semibold text-brand-400;
+  }
+
+  /* 表格：移动端整体横向滚动，不挤压正文 */
+  .md-body table {
+    @apply my-4 block w-max max-w-full overflow-x-auto border-collapse text-left text-sm;
+  }
+  .md-body thead {
+    @apply bg-slate-50;
+  }
+  .md-body th {
+    @apply border border-slate-200 px-3 py-2 font-semibold text-ink-900;
+  }
+  .md-body td {
+    @apply border border-slate-200 px-3 py-2 align-top text-ink-600;
+  }
+  .md-body tbody tr:nth-child(even) {
+    @apply bg-slate-50/50;
+  }
+
+  /* 代码：等宽、浅色底、横向滚动，不做语法高亮 */
+  .md-body code {
+    @apply rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[0.85em] text-ink-700;
+  }
+  .md-body pre {
+    @apply my-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[13px] leading-relaxed text-ink-700;
+  }
+  .md-body pre code {
+    @apply block bg-transparent p-0 font-mono text-[0.95em] text-ink-700;
+  }
+
+  .md-body hr {
+    @apply my-7 h-px border-0 bg-gradient-to-r from-transparent via-slate-200 to-transparent;
+  }
+  .md-body img {
+    @apply my-4 max-w-full rounded-xl border border-slate-100 bg-white shadow-soft;
+  }
 }
 
 @layer utilities {

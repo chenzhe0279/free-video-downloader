@@ -2,13 +2,17 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   api,
+  downloadSummarySubtitle,
   type ProbeResult,
+  type SubtitleFormat,
   type SummaryConfig,
   type SummaryTaskStatus,
   type SummaryTranscriptSegment,
 } from '../api/client'
 import { formatDuration } from '../utils/format'
-import MindmapTree from './MindmapTree.vue'
+import { safeFilename, saveBlob } from '../utils/download'
+import MarkdownNote from './MarkdownNote.vue'
+import MindmapViewer from './MindmapViewer.vue'
 import QaChatPanel from './QaChatPanel.vue'
 
 const props = defineProps<{
@@ -21,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 type TabKey = 'summary' | 'chapters' | 'transcript' | 'mindmap' | 'qa'
+type SummaryView = 'note' | 'cards'
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'summary', label: '总结' },
@@ -43,11 +48,45 @@ const transcriptError = ref('')
 const transcriptLimit = ref(200)
 const elapsed = ref(0)
 const copied = ref(false)
+const subtitleFormat = ref<SubtitleFormat>('srt')
+const subtitleDownloading = ref(false)
+const subtitleError = ref('')
+
+const subtitleFormats: { value: SubtitleFormat; label: string }[] = [
+  { value: 'srt', label: 'SRT 字幕' },
+  { value: 'vtt', label: 'VTT 字幕' },
+  { value: 'txt', label: 'TXT 纯文本' },
+  { value: 'md', label: 'Markdown 文稿' },
+]
+
+const SUMMARY_VIEW_KEY = 'vds-summary-view'
+
+function readSummaryView(): SummaryView {
+  try {
+    return window.localStorage.getItem(SUMMARY_VIEW_KEY) === 'cards' ? 'cards' : 'note'
+  } catch {
+    return 'note'
+  }
+}
+
+const summaryView = ref<SummaryView>(readSummaryView())
 
 let pollTimer: number | undefined
 let elapsedTimer: number | undefined
 
 const summary = computed(() => task.value?.summary ?? null)
+const effectiveSummaryView = computed<SummaryView>(() =>
+  summaryView.value === 'note' && summary.value?.markdown?.trim() ? 'note' : 'cards',
+)
+
+function setSummaryView(view: SummaryView) {
+  summaryView.value = view
+  try {
+    window.localStorage.setItem(SUMMARY_VIEW_KEY, view)
+  } catch {
+    /* 隐私模式下 localStorage 可能不可用，忽略即可 */
+  }
+}
 const visibleTabs = computed(() =>
   tabs.filter((tab) => tab.key !== 'qa' || Boolean(config.value?.qa_enabled)),
 )
@@ -251,6 +290,7 @@ async function cancel() {
 
 function selectTab(tab: TabKey) {
   activeTab.value = tab
+  subtitleError.value = ''
   if (tab === 'transcript' && transcript.value === null) {
     void loadTranscript()
   }
@@ -316,6 +356,22 @@ async function copyTranscript() {
     }, 2000)
   } catch {
     /* 忽略剪贴板权限错误 */
+  }
+}
+
+async function downloadSubtitle() {
+  const taskId = task.value?.task_id
+  if (!taskId || subtitleDownloading.value) return
+  subtitleDownloading.value = true
+  subtitleError.value = ''
+  try {
+    const file = await downloadSummarySubtitle(taskId, subtitleFormat.value)
+    const fallback = `${safeFilename(props.result.title || '视频')}-字幕.${subtitleFormat.value}`
+    saveBlob(file.blob, file.filename || fallback)
+  } catch (err) {
+    subtitleError.value = errorText(err)
+  } finally {
+    subtitleDownloading.value = false
   }
 }
 
@@ -504,72 +560,116 @@ onBeforeUnmount(() => {
 
           <!-- 总结 -->
           <div v-if="activeTab === 'summary'" class="space-y-4">
-            <div class="rounded-xl border border-violet-100 bg-violet-50/70 px-4 py-3">
-              <p class="text-[11px] font-semibold uppercase tracking-wide text-violet-500">TL;DR</p>
-              <p class="mt-1 text-sm font-medium leading-relaxed text-ink-900">
-                {{ summary.tldr }}
-              </p>
-            </div>
-
-            <div v-if="summary.overview">
-              <h4 class="text-sm font-semibold text-ink-900">内容概述</h4>
-              <p class="mt-1.5 text-sm leading-relaxed text-ink-600">{{ summary.overview }}</p>
-            </div>
-
-            <div v-if="summary.keywords.length" class="flex flex-wrap gap-1.5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="inline-flex rounded-xl bg-slate-100 p-1">
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1 text-xs font-medium transition"
+                  :class="
+                    effectiveSummaryView === 'note'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-700'
+                  "
+                  @click="setSummaryView('note')"
+                >
+                  笔记
+                </button>
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1 text-xs font-medium transition"
+                  :class="
+                    effectiveSummaryView === 'cards'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-700'
+                  "
+                  @click="setSummaryView('cards')"
+                >
+                  卡片
+                </button>
+              </div>
               <span
-                v-for="keyword in summary.keywords"
-                :key="keyword"
-                class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-ink-500"
+                v-if="summaryView === 'note' && effectiveSummaryView === 'cards'"
+                class="text-[11px] text-ink-400"
               >
-                {{ keyword }}
+                本次总结没有 Markdown 笔记，已显示卡片视图
               </span>
             </div>
 
-            <div v-if="summary.key_points.length">
-              <h4 class="text-sm font-semibold text-ink-900">核心要点</h4>
-              <ol class="mt-2 space-y-2">
-                <li
-                  v-for="(point, index) in summary.key_points"
-                  :key="`${index}-${point.title}`"
-                  class="flex gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5"
-                >
-                  <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-violet-50 text-[10px] font-bold text-violet-600">
-                    {{ index + 1 }}
-                  </span>
-                  <div class="min-w-0">
-                    <p class="text-sm font-semibold text-ink-900">
-                      {{ point.title }}
-                      <button
-                        v-if="point.timestamp_seconds !== null"
-                        type="button"
-                        class="ml-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-40"
-                        :disabled="!seekable"
-                        @click="emitSeek(point.timestamp_seconds)"
-                      >
-                        {{ formatDuration(point.timestamp_seconds) }}
-                      </button>
-                    </p>
-                    <p v-if="point.detail" class="mt-0.5 text-xs leading-relaxed text-ink-500">
-                      {{ point.detail }}
-                    </p>
-                  </div>
-                </li>
-              </ol>
-            </div>
+            <MarkdownNote
+              v-if="effectiveSummaryView === 'note'"
+              :markdown="summary.markdown"
+              :seekable="seekable"
+              @seek="emitSeek"
+            />
 
-            <div v-if="summary.concepts.length">
-              <h4 class="text-sm font-semibold text-ink-900">关键概念</h4>
-              <dl class="mt-2 grid gap-2 sm:grid-cols-2">
-                <div
-                  v-for="concept in summary.concepts"
-                  :key="concept.term"
-                  class="rounded-xl border border-slate-100 bg-white px-3 py-2.5"
+            <div v-else class="space-y-4">
+              <div class="rounded-xl border border-violet-100 bg-violet-50/70 px-4 py-3">
+                <p class="text-[11px] font-semibold uppercase tracking-wide text-violet-500">TL;DR</p>
+                <p class="mt-1 text-sm font-medium leading-relaxed text-ink-900">
+                  {{ summary.tldr }}
+                </p>
+              </div>
+
+              <div v-if="summary.overview">
+                <h4 class="text-sm font-semibold text-ink-900">内容概述</h4>
+                <p class="mt-1.5 text-sm leading-relaxed text-ink-600">{{ summary.overview }}</p>
+              </div>
+
+              <div v-if="summary.keywords.length" class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="keyword in summary.keywords"
+                  :key="keyword"
+                  class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-ink-500"
                 >
-                  <dt class="text-sm font-semibold text-ink-900">{{ concept.term }}</dt>
-                  <dd class="mt-0.5 text-xs leading-relaxed text-ink-500">{{ concept.explanation }}</dd>
-                </div>
-              </dl>
+                  {{ keyword }}
+                </span>
+              </div>
+
+              <div v-if="summary.key_points.length">
+                <h4 class="text-sm font-semibold text-ink-900">核心要点</h4>
+                <ol class="mt-2 space-y-2">
+                  <li
+                    v-for="(point, index) in summary.key_points"
+                    :key="`${index}-${point.title}`"
+                    class="flex gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5"
+                  >
+                    <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-violet-50 text-[10px] font-bold text-violet-600">
+                      {{ index + 1 }}
+                    </span>
+                    <div class="min-w-0">
+                      <p class="text-sm font-semibold text-ink-900">
+                        {{ point.title }}
+                        <button
+                          v-if="point.timestamp_seconds !== null"
+                          type="button"
+                          class="ml-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-40"
+                          :disabled="!seekable"
+                          @click="emitSeek(point.timestamp_seconds)"
+                        >
+                          {{ formatDuration(point.timestamp_seconds) }}
+                        </button>
+                      </p>
+                      <p v-if="point.detail" class="mt-0.5 text-xs leading-relaxed text-ink-500">
+                        {{ point.detail }}
+                      </p>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+
+              <div v-if="summary.concepts.length">
+                <h4 class="text-sm font-semibold text-ink-900">关键概念</h4>
+                <dl class="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div
+                    v-for="concept in summary.concepts"
+                    :key="concept.term"
+                    class="rounded-xl border border-slate-100 bg-white px-3 py-2.5"
+                  >
+                    <dt class="text-sm font-semibold text-ink-900">{{ concept.term }}</dt>
+                    <dd class="mt-0.5 text-xs leading-relaxed text-ink-500">{{ concept.explanation }}</dd>
+                  </div>
+                </dl>
+              </div>
             </div>
           </div>
 
@@ -610,19 +710,42 @@ onBeforeUnmount(() => {
 
           <!-- 文稿 -->
           <div v-else-if="activeTab === 'transcript'" class="space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <p class="text-[11px] text-ink-400">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <p class="text-[11px] leading-relaxed text-ink-400">
                 共 {{ transcript?.length ?? 0 }} 段；时间戳为{{ task?.transcript_source === 'asr' ? '语音识别分片起点（约 1 分钟粒度）' : '平台字幕时间' }}。
               </p>
-              <button
-                v-if="transcript?.length"
-                type="button"
-                class="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700"
-                @click="copyTranscript"
-              >
-                复制文稿
-              </button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-if="transcript?.length"
+                  type="button"
+                  class="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-ink-600 transition hover:border-violet-200 hover:text-violet-700"
+                  @click="copyTranscript"
+                >
+                  复制文稿
+                </button>
+                <select
+                  v-model="subtitleFormat"
+                  class="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-ink-600 focus:border-violet-300 focus:outline-none"
+                  :disabled="subtitleDownloading || !transcript?.length"
+                  aria-label="字幕文件格式"
+                >
+                  <option v-for="item in subtitleFormats" :key="item.value" :value="item.value">
+                    {{ item.label }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="subtitleDownloading || !transcript?.length"
+                  @click="downloadSubtitle"
+                >
+                  {{ subtitleDownloading ? '下载中…' : '下载字幕' }}
+                </button>
+              </div>
             </div>
+            <p v-if="subtitleError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
+              {{ subtitleError }}
+            </p>
 
             <p v-if="transcriptLoading" class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-ink-400">
               正在加载文稿…
@@ -661,7 +784,7 @@ onBeforeUnmount(() => {
 
           <!-- 思维导图 -->
           <div v-else-if="activeTab === 'mindmap'" class="rounded-xl border border-slate-100 bg-white px-4 py-3">
-            <MindmapTree v-if="summary.mindmap" :node="summary.mindmap" />
+            <MindmapViewer v-if="summary.mindmap" :node="summary.mindmap" :title="safeTitle()" />
             <p v-else class="text-xs text-ink-400">本次总结没有生成思维导图。</p>
           </div>
 

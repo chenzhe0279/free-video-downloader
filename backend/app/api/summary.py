@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.deps import client_ip, enforce_rate
 from app.security import SlidingWindowLimiter, UnsafeUrlError, validate_public_url
+from app.services.summary import exporters
 from app.services.summary.errors import (
     SummaryBusyError,
     SummaryDisabledError,
@@ -25,6 +27,8 @@ from app.services.summary.tasks import summary_manager
 
 router = APIRouter(prefix="/api/summary", tags=["summary"])
 logger = logging.getLogger("vds.summary.api")
+
+SubtitleFormat = Literal["srt", "vtt", "txt", "md"]
 
 _settings = get_summary_settings()
 summary_limiter = SlidingWindowLimiter(_settings.summary_rate_limit_per_minute)
@@ -122,6 +126,51 @@ async def get_summary_transcript(task_id: str) -> SummaryTranscriptResponse:
     if task is None:
         raise HTTPException(status_code=404, detail="总结任务不存在或已过期")
     return summary_manager.transcript(task)
+
+
+@router.get(
+    "/{task_id}/subtitles",
+    response_class=Response,
+    summary="下载 AI 总结字幕文件（SRT/VTT/TXT/Markdown）",
+)
+async def download_summary_subtitles(
+    task_id: str,
+    format: SubtitleFormat = "srt",
+) -> Response:
+    task = summary_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="总结任务不存在或已过期")
+    if not exporters.prepare_cues(task.segments, task.duration):
+        raise HTTPException(status_code=409, detail="字幕尚未生成，请等待总结完成")
+
+    try:
+        if format == "md":
+            body = exporters.to_markdown(
+                task.segments,
+                title=task.title,
+                source=task.transcript_source,
+                language=task.transcript_language,
+                duration=task.duration,
+            )
+        elif format == "txt":
+            body = exporters.to_txt(task.segments)
+        elif format == "vtt":
+            body = exporters.to_vtt(task.segments, task.duration)
+        else:
+            body = exporters.to_srt(task.segments, task.duration)
+    except Exception as exc:  # pragma: no cover - 纯格式化，防御性兜底
+        logger.exception("生成字幕文件失败：task=%s format=%s", task_id, format)
+        raise HTTPException(status_code=500, detail="字幕生成失败") from exc
+
+    filename = exporters.subtitle_filename(task, format)
+    return Response(
+        content=body,
+        media_type=exporters.MEDIA_TYPES[format],
+        headers={
+            "Content-Disposition": exporters.content_disposition(filename),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.delete(

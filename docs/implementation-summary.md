@@ -1,22 +1,22 @@
 # 万能视频下载站 · 功能实现总结
 
-> 版本：v0.5（2026-11-14）
-> 关联文档：[需求分析](./requirements.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
+> 版本：v0.6（2026-11-14）
+> 关联文档：[需求分析](./requirements.md) · [v0.6 内容体验设计](./v0.6-content-experience-design.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
 
 ---
 
-## 0. 本期新增（v0.5）
+## 0. 本期新增（v0.6）
 
-2026-11-14 本轮在既有下载/预览/去水印能力上新增：
+2026-11-14 本轮在既有下载/预览/去水印/AI 总结/问答能力上新增：
 
 | 新增能力 | 说明 | 详见 |
-|------|------|------|
-| AI 视频总结 | 平台字幕优先，无字幕时 DeepSeek ASR 60 秒分片；输出 TL;DR、章节、要点、概念、文稿、Markdown | 第 12 节 · [设计文档](./ai-summary-design.md) |
-| 视频内 AI 问答 | 严格基于总结、相关性 gate、无关拒答、SSE token 流式、最近 3 轮多轮对话 | 第 13 节 · [设计文档](./ai-qa-design.md) |
-| Markmap 思维导图 | 用 `markmap-view` 渲染彩色分支、根节点胶囊、缩放/拖拽/折叠 | 第 12 节 |
-| 测试与验收 | 62 个后端测试；Mock/真实 DeepSeek；无头 Chrome 总结/问答/思维导图 | 第 12、13 节 |
+|---|---|---|
+| Markdown 笔记阅读 | 总结页默认渲染精排版笔记：目录、标题层级、引用、列表、表格、可点击时间戳；保留卡片视图切换 | 第 14 节 · [设计文档](./v0.6-content-experience-design.md) |
+| 思维导图全屏与导出 | 600px 内联、页面内全屏、PNG 2x/3x 与 SVG 导出、展开全部、移动端适配 | 第 14 节 |
+| 字幕文件下载 | 总结完成后下载 SRT/VTT/TXT/Markdown，平台字幕与 ASR 逐字稿均支持 | 第 14 节 |
+| 测试与验收 | 后端 95 个测试；真实 DeepSeek 链路；无头 Chrome 端到端验收 | 第 14 节 |
 
-> 既有下载主链路（`probe/preview/download/stream/task_manager`）未改；增量改动集中在 `main.py` 注册 AI 路由、新增 `services/summary` 与 `services/qa`、`settings/schemas/deepseek/tasks` 的加法式扩展，以及前端 AI 面板、问答组件、Markmap 和 seek 出口。
+> 既有下载主链路（`probe/preview/download/stream/task_manager`）与 AI 总结/问答核心逻辑未改；增量集中在 `services/summary/{markdown,exporters}.py`、`api/summary.py`、前端 Markdown/导图组件与面板接线。
 
 ---
 
@@ -414,3 +414,87 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 - 无头 Chrome：问答标签页、逐字增长（innerText 从 416→509→587）、拒答样式、多轮、停止、标签切换保持会话均通过；控制台无异常；截图见 `runtime/proof/ai-qa-*.png`。
 - 现有总结链路与前端构建回归通过。
 - 已知限制：仅基于总结，总结没覆盖的细节无法回答；相关性 gate 可能误判；历史仅当前页面；拒答为固定 SSE 事件而非 token 流。
+
+---
+
+## 14. 内容体验增强（v0.6）
+
+> 详细竞品调研与方案见 [v0.6 内容体验设计](./v0.6-content-experience-design.md)。
+
+### 14.1 Markdown 笔记阅读
+
+- 后端 `build_markdown()`：
+  - 新增 `_inline()` 把 AI 文本折叠为单行并转义 `\`、`` ` ``、`*`、`_`、`[`、`]`、`<`、`>`、`|`，避免 AI 输出破坏结构或注入链接；
+  - 时间戳改为 `[mm:ss](#t=秒)`，章节标题与要点均带可跳转链接；
+  - 关键词改为行内代码；思维导图节点文本同样转义。
+- 前端新增 `utils/markdown.ts`：markdown-it（`html:false`、`linkify:true`）+ DOMPurify（`USE_PROFILES: {html:true}`）；在 token 流上给标题注入 `md-h-{n}`、收集 h2/h3 目录、给时间戳加 `md-timestamp`/`data-seek`、给外链加 `target/rel`。
+- 新增 `MarkdownNote.vue`：目录折叠面板、`v-html` 消毒内容、时间戳事件委托（preventDefault，不污染 URL hash）、空内容提示；移动端目录默认收起。
+- `AiSummaryPanel.vue` 总结页新增「笔记 / 卡片」分段控件，默认笔记，偏好存 `localStorage('vds-summary-view')`；markdown 为空时自动回退卡片。
+- `style.css` 新增 `.md-body` 排版：15/16px 字号、1.85 行高、h2 左侧品牌色竖线、引用块、列表 marker、表格横向滚动、代码块、图片、分割线、时间戳胶囊。
+
+### 14.2 思维导图全屏与导出
+
+- `MindmapTree.vue`：
+  - 新增 `height` prop（默认 600px）；
+  - 根节点胶囊、字体、行高迁移到 markmap `OPTIONS.style`，随 SVG `<style>` 同时作用于页面与导出；
+  - 暴露 `fit / expandAll / exportPng / exportSvgString`；
+  - 导出：等字体 → `getBBox()+32px padding` → 克隆 SVG（补 xmlns、移除根/内容 g 的 zoom transform、补 foreignObject XHTML 命名空间、移除折叠圆点与高亮）→ 设置 viewBox 与目标尺寸 → base64 data URL → Canvas 白底 → `toBlob`；单边 >16384 自动降倍率。
+- 新增 `MindmapViewer.vue`：
+  - 工具条「适应屏幕 / 展开全部 / 导出（PNG 2x、PNG 3x、SVG）/ 全屏」；
+  - 导出菜单 `Teleport to body` + fixed 定位（根据按钮 rect 计算上下位置与右对齐），不会被工具栏 overflow 裁切，滚轮/缩放/点击外部自动关闭；
+  - 内联工具栏桌面单行、窄屏自然换行，不再出现横向滚动条；
+  - `Teleport to body` 全屏弹层，ESC/遮罩/退出按钮关闭，打开时锁 body 滚动、关闭恢复；
+  - 内联与全屏各一个 `MindmapTree` 实例，导出使用当前激活实例；
+  - 失败提示“PNG 导出失败，请改用 SVG”；移动端隐藏标题区、按钮横向滚动。
+- 修复：根节点胶囊 `width: max-content; max-width: var(--markmap-max-width)`，避免 250px 宽背景遮挡分支。
+
+### 14.3 字幕下载
+
+- 新增 `exporters.py`：`prepare_cues()` 过滤空段并补结束时间（`end_seconds` → 下一段起点 → `start+3s`，按视频时长截断，至少 0.5 秒）；`to_srt / to_vtt / to_txt / to_markdown`；文件名 `{标题}-字幕-{平台字幕|AI语音识别}.{ext}`，总长 ≤120，`Content-Disposition` 带 ASCII fallback + `filename*`。
+- 新增 `GET /api/summary/{task_id}/subtitles?format=srt|vtt|txt|md`：
+  - 200：对应 MIME、`attachment`、`Cache-Control: no-store`；
+  - 404：任务不存在/过期；
+  - 409：字幕尚未生成；
+  - 422：非法格式；
+  - 不扣额度、不延长 TTL。
+- 前端 `client.ts` 新增 `downloadSummarySubtitle()`，解析响应头文件名；文稿页新增格式下拉 + 下载按钮，ASR 来源提示约 1 分钟粒度。
+
+### 14.4 验证记录
+
+- 后端：**95 个测试通过**（62 原有 + 6 Markdown + 27 字幕）。
+- 前端：`npx vite build` 通过（JS 405.80 KB / gzip 148.83 KB，CSS 49.78 KB / gzip 8.24 KB）。
+- 真实链路（B站 `BV1s18cziEtw`，68.5 秒，ASR）：
+  - 任务 `a8732f36b71147a8`；ASR 68.52 秒 / 2 分片；总结耗时 20.86 秒；
+  - 3 章节、8 要点、2 概念；Markdown 1983 字符、11 个 `#t=` 时间戳链接；
+  - SRT/VTT/TXT/MD 四种字幕均 200，大小 715/723/650/970 字节。
+- 无头 Chrome E2E（`backend/tests/content_e2e.py`）：
+  - 笔记 11 标题、12 列表、2 引用、11 时间戳；点击 `01:00` 后 `currentTime=60`；
+  - 卡片切换往返正常；视图默认笔记；
+  - 全屏弹层正常，ESC 关闭后 body overflow 恢复；
+  - PNG 2x 1366×1128（190,143B）、PNG 3x 2049×1692（313,530B）、SVG 13,137B；
+  - SRT 下载 715B、Markdown 970B；375px 移动端笔记与导图全屏正常；
+  - 控制台 0 异常，E2E 总耗时约 20 秒。
+- 导出菜单二次验收（修复工具栏裁切后）：菜单 Teleport 到 body、192×121、三项完整；工具栏 `scrollWidth = clientWidth = 642`；回归 E2E PNG 2x 1334×946、PNG 3x 2001×1419、SVG 与字幕均通过，0 异常；截图 `runtime/proof/v0.6-mindmap-toolbar-fixed.png` 与 `v0.6-mindmap-export-menu-fixed.png`。
+- 产物：`runtime/proof/v0.6-*.png`、`v0.6-mindmap-2x-final.png`、`v0.6-mindmap-3x-final.png`、`v0.6-mindmap-final.svg`、`v0.6-subtitle-final.{srt,md}`、`v0.6-e2e.json`、`v0.6-real-summary.md`。
+
+### 14.5 相关文件
+
+- [Markdown 导出](../backend/app/services/summary/markdown.py)
+- [字幕导出](../backend/app/services/summary/exporters.py)
+- [总结 API](../backend/app/api/summary.py)
+- [Markdown 渲染工具](../frontend/src/utils/markdown.ts)
+- [Markdown 笔记组件](../frontend/src/components/MarkdownNote.vue)
+- [思维导图渲染](../frontend/src/components/MindmapTree.vue)
+- [思维导图外壳](../frontend/src/components/MindmapViewer.vue)
+- [AI 总结面板](../frontend/src/components/AiSummaryPanel.vue)
+- [下载工具](../frontend/src/utils/download.ts)
+- [E2E 脚本](../backend/tests/content_e2e.py)
+
+### 14.6 已知限制
+
+- Safari/iOS 对 `foreignObject` → Canvas 支持不稳定，PNG 可能失败，失败时提供 SVG；SVG 为透明背景。
+- ASR 字幕约 1 分钟粒度，平台字幕保留原始时间轴。
+- 总结任务 30 分钟过期后笔记/字幕不可下载。
+- 导图导出当前展开内容；折叠后需先“展开全部”。
+- 导图单边超过 16384px 自动降低倍率。
+- 问答回答仍未渲染 Markdown。

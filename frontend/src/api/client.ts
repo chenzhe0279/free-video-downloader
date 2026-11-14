@@ -185,6 +185,13 @@ export interface SummaryTranscriptResponse {
   segments: SummaryTranscriptSegment[]
 }
 
+export type SubtitleFormat = 'srt' | 'vtt' | 'txt' | 'md'
+
+export interface SummarySubtitleFile {
+  blob: Blob
+  filename: string
+}
+
 export interface QaHistoryMessage {
   role: 'user' | 'assistant'
   content: string
@@ -282,6 +289,53 @@ export async function streamSummaryAnswer(
   }
 
   return response
+}
+
+function parseDownloadFilename(disposition: string, fallback: string): string {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      /* 非法编码时回退到 ASCII 文件名 */
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(disposition)
+  return plain?.[1] || fallback
+}
+
+export async function downloadSummarySubtitle(
+  taskId: string,
+  format: SubtitleFormat,
+): Promise<SummarySubtitleFile> {
+  let response: Response
+  try {
+    response = await fetch(
+      `${BASE}/api/summary/${encodeURIComponent(taskId)}/subtitles?format=${encodeURIComponent(format)}`,
+    )
+  } catch {
+    throw new Error('无法连接服务端，请确认后端已启动')
+  }
+
+  if (!response.ok) {
+    let detail = `下载字幕失败（${response.status}）`
+    try {
+      const payload = await response.json()
+      if (payload?.detail) {
+        detail =
+          typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail)
+      }
+    } catch {
+      /* keep default message */
+    }
+    throw new Error(detail)
+  }
+
+  const disposition = response.headers.get('content-disposition') || ''
+  return {
+    blob: await response.blob(),
+    filename: parseDownloadFilename(disposition, `字幕.${format}`),
+  }
 }
 
 export const api = {
