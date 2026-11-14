@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import PreviewPlayer from './PreviewPlayer.vue'
 import type { DownloadMode, PreviewState, ProbeResult } from '../api/client'
-import { formatBytes, platformLabel } from '../utils/format'
+import { formatBytes, formatDuration, platformLabel } from '../utils/format'
 
 const props = defineProps<{
   result: ProbeResult
@@ -35,12 +35,21 @@ defineExpose({
   seekTo: (seconds: number) => playerRef.value?.seekTo(seconds),
 })
 
-function canDirect(opt: ProbeResult['options'][number]) {
+function canDirect(opt: ProbeResult['options'][number] | undefined) {
+  if (!opt) return false
   return Boolean(opt.progressive && opt.direct_format_id && !opt.audio_only)
 }
 
-function isBusy(optId: string) {
-  return props.busyOption === optId
+function isBusy(mode: DownloadMode) {
+  return Boolean(props.busyOption) && props.busyOption === props.selectedId && props.busyMode === mode
+}
+
+const primaryBusy = computed(() => Boolean(props.busyOption) && props.busyOption === props.selectedId)
+
+function primaryLabel(): string {
+  if (isBusy('local')) return '准备中…'
+  if (props.busyOption === props.selectedId) return '处理中…'
+  return '下载到本地'
 }
 
 function onWatermarkChange(event: Event) {
@@ -49,8 +58,11 @@ function onWatermarkChange(event: Event) {
 </script>
 
 <template>
-  <section class="mt-8 card overflow-hidden animate-float-in" id="result">
-    <div class="p-5">
+  <section
+    id="result"
+    class="card animate-float-in overflow-hidden lg:flex lg:h-full lg:min-h-0 lg:flex-col"
+  >
+    <div class="p-4">
       <PreviewPlayer
         ref="playerRef"
         :poster="props.result.thumbnail"
@@ -64,135 +76,122 @@ function onWatermarkChange(event: Event) {
         @request-preview="emit('preview')"
       />
 
-      <div class="mt-4 min-w-0">
-        <h2 class="line-clamp-2 text-lg font-bold leading-snug text-ink-900">
+      <div class="mt-3 min-w-0">
+        <h2 class="line-clamp-2 text-base font-bold leading-snug text-ink-900 sm:text-lg">
           {{ props.result.title }}
         </h2>
-        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span class="rounded-full bg-brand-50 px-2.5 py-1 font-semibold text-brand-700">
+        <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-500">
+          <span class="rounded-full bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">
             {{ platformLabel(props.result.platform) }}
           </span>
-          <span v-if="props.result.uploader" class="text-ink-500">
-            作者：{{ props.result.uploader }}
+          <span v-if="props.result.uploader" class="max-w-[14rem] truncate">
+            {{ props.result.uploader }}
           </span>
-          <span v-if="props.result.is_playlist" class="text-ink-500">
+          <span v-if="props.result.duration">{{ formatDuration(props.result.duration) }}</span>
+          <span v-if="props.result.subtitles.length">含 {{ props.result.subtitles.length }} 种字幕</span>
+          <span v-if="props.result.is_playlist">
             合集 · {{ props.result.entry_count ?? '多' }} 个视频
           </span>
-          <span v-if="props.result.subtitles.length" class="text-ink-500">
-            含 {{ props.result.subtitles.length }} 种字幕
-          </span>
         </div>
-        <p class="mt-3 text-xs leading-relaxed text-ink-400">
-          上面的播放器可以直接在线预览当前选中的清晰度：单文件格式边下边播、秒开；音视频分离的高清格式会先由服务端合并，完成后再开始播放。「下载到本地」由服务端完成合并后立即传回本机，服务器只做临时中转；「服务端转存」会把文件暂存 1 小时，方便换设备或稍后取回。
-        </p>
       </div>
     </div>
 
-    <div class="border-t border-slate-100 px-5 py-4">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p class="text-sm font-semibold text-ink-900">选择清晰度</p>
-          <p class="mt-0.5 text-[11px] text-ink-400">
-            选中某个清晰度后，点上方播放器即可在线预览该画质。
-          </p>
-        </div>
+    <div class="border-t border-slate-100 px-4 py-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto lg:overscroll-contain">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs font-semibold text-ink-900">清晰度</p>
         <label
           v-if="props.result.watermark?.available"
-          class="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-700"
+          class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700"
         >
           <input
             type="checkbox"
-            class="h-3.5 w-3.5 accent-amber-600"
+            class="h-3 w-3 accent-amber-600"
             :checked="props.removeWatermark"
             @change="onWatermarkChange"
           />
-          去水印 · 有损重编码
+          去水印 · 有损
         </label>
       </div>
-      <p
-        v-if="props.result.watermark?.available"
-        class="mb-3 rounded-lg bg-amber-50/70 px-3 py-2 text-[11px] leading-relaxed text-amber-700"
-      >
-        已识别：{{ props.result.watermark.label }}。勾选后会在音视频合并完成后重绘水印区域，耗时略长。
-      </p>
-      <ul class="space-y-2">
-        <li
+
+      <div class="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="清晰度">
+        <button
           v-for="opt in props.result.options"
           :key="opt.id"
-          class="flex flex-col gap-3 rounded-xl border p-3 transition sm:flex-row sm:items-center"
+          type="button"
+          role="radio"
+          :aria-checked="props.selectedId === opt.id"
+          class="shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
           :class="
             props.selectedId === opt.id
-              ? 'border-brand-500 bg-brand-50/60 shadow-[0_0_0_1px_rgba(37,99,235,0.2)]'
-              : 'border-slate-200 bg-white hover:border-brand-200 hover:bg-slate-50/60'
+              ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-[0_0_0_1px_rgba(37,99,235,0.2)]'
+              : 'border-slate-200 bg-white text-ink-600 hover:border-brand-300 hover:text-brand-600'
           "
+          @click="emit('select', opt.id)"
         >
+          {{ opt.label }}
+        </button>
+      </div>
+
+      <div v-if="selectedOption" class="mt-2 space-y-0.5">
+        <p class="flex flex-wrap items-center gap-x-1.5 text-[11px] text-ink-500">
+          <span v-if="selectedOption.ext" class="font-medium uppercase">
+            {{ selectedOption.ext }}
+          </span>
+          <span v-if="selectedOption.filesize">· 约 {{ formatBytes(selectedOption.filesize) }}</span>
+          <span v-if="canDirect(selectedOption)" class="text-emerald-600">· 支持直链</span>
+          <span v-if="selectedOption.audio_only" class="text-amber-600">· 音频不支持在线预览</span>
+        </p>
+        <p v-if="selectedOption.note" class="line-clamp-1 text-[11px] text-ink-400" :title="selectedOption.note">
+          {{ selectedOption.note }}
+        </p>
+      </div>
+      <p v-else class="mt-2 text-[11px] text-ink-400">该链接没有可下载的清晰度。</p>
+
+      <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <button
+          type="button"
+          class="btn-primary flex-1 px-4 py-2.5 text-sm"
+          :disabled="!selectedOption || primaryBusy"
+          @click="emit('local', props.selectedId)"
+        >
+          {{ primaryLabel() }}
+        </button>
+        <div class="flex items-center justify-center gap-2">
+          <button
+            v-if="canDirect(selectedOption) && !props.removeWatermark"
+            type="button"
+            class="chip px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="primaryBusy"
+            @click="emit('direct', props.selectedId)"
+          >
+            {{ isBusy('direct') ? '获取中…' : '直链下载' }}
+          </button>
           <button
             type="button"
-            class="flex flex-1 items-center gap-3 text-left"
-            @click="emit('select', opt.id)"
+            class="chip px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="primaryBusy"
+            @click="emit('server', props.selectedId)"
           >
-            <span
-              class="grid h-4 w-4 shrink-0 place-items-center rounded-full border-2"
-              :class="props.selectedId === opt.id ? 'border-brand-600' : 'border-slate-300'"
-            >
-              <span
-                v-if="props.selectedId === opt.id"
-                class="h-2 w-2 rounded-full bg-brand-600"
-              />
-            </span>
-            <span class="min-w-0">
-              <span class="flex flex-wrap items-center gap-1.5">
-                <span class="text-sm font-semibold text-ink-900">{{ opt.label }}</span>
-                <span
-                  v-if="opt.ext"
-                  class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase text-ink-400"
-                >
-                  {{ opt.ext }}
-                </span>
-                <span
-                  v-if="canDirect(opt)"
-                  class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600"
-                >
-                  支持直链
-                </span>
-              </span>
-              <span class="mt-0.5 block text-xs text-ink-400">
-                {{ opt.note }}<template v-if="opt.filesize"> · 约 {{ formatBytes(opt.filesize) }}</template>
-              </span>
-            </span>
+            {{ isBusy('server') ? '转存中…' : '服务端转存' }}
           </button>
+        </div>
+      </div>
 
-          <div class="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
-            <button
-              type="button"
-              class="btn-primary w-full px-4 py-2 text-xs sm:w-auto"
-              :disabled="isBusy(opt.id)"
-              @click="emit('local', opt.id)"
-            >
-              {{ isBusy(opt.id) && props.busyMode === 'local' ? '准备中…' : '下载到本地' }}
-            </button>
-            <div class="flex items-center justify-center gap-3 text-[11px] text-ink-400">
-              <button
-                v-if="canDirect(opt) && !props.removeWatermark"
-                type="button"
-                class="font-medium transition hover:text-brand-600 disabled:opacity-40"
-                :disabled="isBusy(opt.id)"
-                @click="emit('direct', opt.id)"
-              >
-                {{ isBusy(opt.id) && props.busyMode === 'direct' ? '获取直链中…' : '直链' }}
-              </button>
-              <button
-                type="button"
-                class="font-medium transition hover:text-brand-600 disabled:opacity-40"
-                :disabled="isBusy(opt.id)"
-                @click="emit('server', opt.id)"
-              >
-                {{ isBusy(opt.id) && props.busyMode === 'server' ? '转存中…' : '服务端转存' }}
-              </button>
-            </div>
-          </div>
-        </li>
-      </ul>
+      <p
+        v-if="props.removeWatermark && props.result.watermark?.available"
+        class="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700"
+      >
+        已识别：{{ props.result.watermark.label }}。合并完成后重绘水印区域，耗时略长。
+      </p>
+
+      <details class="group mt-2.5 lg:mt-auto">
+        <summary class="cursor-pointer text-[11px] font-medium text-ink-400 marker:content-none hover:text-brand-600">
+          预览与下载说明
+        </summary>
+        <p class="mt-1.5 text-[11px] leading-relaxed text-ink-400">
+          上方播放器在线预览当前清晰度：单文件格式边下边播；音视频分离的高清格式先由服务端合并，完成后再播放。「下载到本地」由服务端合并后立即传回本机，服务器只做临时中转；「服务端转存」把文件暂存 1 小时，方便换设备或稍后取回。
+        </p>
+      </details>
     </div>
   </section>
 </template>

@@ -26,6 +26,10 @@ import websockets
 
 from tests.browser_e2e import CDP, PROOF_DIR
 
+# Windows 控制台默认 GBK，打印含 emoji 的面板文案会 UnicodeEncodeError
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 APP_URL = "http://127.0.0.1:8000"
 CDP_URL = "http://127.0.0.1:9222"
 VIDEO_URL = "https://www.bilibili.com/video/BV1s18cziEtw"
@@ -117,10 +121,10 @@ async def run() -> int:
 
         # 2. 选中较轻量的清晰度，便于时间戳跳转
         await cdp.eval(
-            "(() => { const items = [...document.querySelectorAll('#result li')];"
-            " const target = items.find((li) => li.innerText.includes('360P'))"
-            " || items.find((li) => li.innerText.includes('480P')) || items[0];"
-            " if (!target) return false; target.querySelector('button')?.click(); return true; })()"
+            "(() => { const chips = [...document.querySelectorAll('#result [role=radio]')];"
+            " const target = chips.find((b) => b.textContent.includes('360P'))"
+            " || chips.find((b) => b.textContent.includes('480P')) || chips[0];"
+            " if (!target) return false; target.click(); return true; })()"
         )
         await asyncio.sleep(1.5)
 
@@ -149,6 +153,15 @@ async def run() -> int:
             result["exceptions"] = cdp.exceptions[:10]
             RESULT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             return 1
+
+        # 3.1 v0.8 起总结以打字机输出，必须等流结束再统计 Markdown 结构
+        await cdp.wait_for(
+            "document.querySelector('#ai-summary')?.dataset.summaryPhase || 'idle'",
+            lambda phase: phase == "done",
+            timeout=120,
+            interval=0.4,
+            label="总结输出完成",
+        )
 
         # 4. 笔记视图
         await cdp.wait_for(

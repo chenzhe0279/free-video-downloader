@@ -16,13 +16,20 @@
 | AI 问答 | 严格基于总结、相关性 gate、无关拒答、SSE 流式、最近 3 轮多轮对话 |
 | 思维导图 | Markmap 交互式导图：彩色分支、根节点胶囊、缩放/拖拽/折叠、全屏、导出 PNG/SVG |
 | 字幕下载 | 总结完成后下载 SRT / VTT / TXT / Markdown 字幕，平台字幕与 ASR 逐字稿都支持 |
+| 同屏工作台 | 解析结果与 AI 总结左右同屏：左栏播放器/信息/清晰度/下载，右栏总结；≥1024px 两栏等高固定、内部滚动，移动端单列 |
+| 解析即总结 | 解析成功自动生成总结（默认开启、可关闭并记忆），缓存复用不占额度，不支持的视频降级为提示 |
+| 总结思考态 | 生成期间不展示进度条：跳动圆点 +「正在总结中…」+ 阶段文案 + 已用时 + 取消 |
+| SSE 打字机 | 总结完成后直接打开结果界面，Markdown 按块流出；流不可用时回退轮询 |
+| 升级 Pro | 顶栏品牌蓝胶囊入口，链接会员权益区 |
 
-> 2026-11-14 本轮新增：Markdown 笔记精排版、思维导图全屏与高清导出、字幕文件下载。
+> 2026-11-14 本轮新增：无进度条总结流（思考态 + SSE 打字机）、左右栏等高固定工作台、顶栏「升级 Pro」。
 
 ## 文档索引
 
 - [需求分析](docs/requirements.md)
 - [实现总结](docs/implementation-summary.md)
+- [v0.8 无进度条总结流与等高工作台设计](docs/v0.8-streaming-summary-design.md)
+- [v0.7 同屏工作台与解析即总结设计](docs/v0.7-single-screen-design.md)
 - [v0.6 内容体验增强设计（含竞品调研）](docs/v0.6-content-experience-design.md)
 - [AI 视频总结设计（含竞品调研）](docs/ai-summary-design.md)
 - [AI 视频问答设计](docs/ai-qa-design.md)
@@ -96,6 +103,9 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 | `VDS_QA_MAX_QUESTION_CHARS` | `500` | 单次提问最大字数 |
 | `VDS_QA_MAX_HISTORY_MESSAGES` | `6` | 多轮对话保留消息数（3 轮） |
 | `VDS_QA_MAX_ANSWER_TOKENS` | `1200` | 单次回答最大 token |
+| `VDS_SUMMARY_STREAM_POLL_SECONDS` | `0.8` | 总结未完成时的状态轮询间隔 |
+| `VDS_SUMMARY_STREAM_CHUNK_CHARS` | `48` | SSE 打字机每块字符数（16–400） |
+| `VDS_SUMMARY_STREAM_INTERVAL_MS` | `35` | SSE 打字机块间隔毫秒（0–200，0 为瞬时） |
 
 完整配置见 `backend/.env.example` 与 [AI 问答设计文档](docs/ai-qa-design.md)。
 
@@ -123,14 +133,28 @@ npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 - 预览地址由 `POST /api/preview` 生成，返回 `proxy` / `file` / `task` 三种模式；同一个 IP 的相同清晰度会复用同一份预览副本；
 - 预览不应用去水印，去水印仍只影响「下载到本地」「服务端转存」。
 
+## 同屏工作台与解析即总结
+
+解析成功后页面自动滚动到工作台，视频信息与 AI 总结左右同屏：
+
+- **左栏**：播放器、标题/平台/作者/时长、清晰度 chips、选中项详情、主次下载按钮、去水印开关；桌面端与右栏**等高固定**（`100dvh - 5.5rem`），内容超高时在栏内滚动，≥1024px 才启用双栏；
+- **右栏**：AI 总结（思考态 / 笔记 / 章节 / 文稿 / 思维导图 / 问答），标签栏带 📝 / 📑 / 📄 / 🧠 / 💬 emoji 图标，在桌面吸顶，正文限宽以保证阅读行宽；
+- **首屏**：Hero 间距已压缩、平台 chips 单行展示；解析成功后自动滚动到工作台，优先展示视频与总结核心内容；
+- **自动总结**：解析完成即自动创建总结任务，无需再点一次；命中缓存不消耗额度；合集、超过时长上限会在发请求前拦截；额度用尽、并发限制、未启用等可预期失败只给中性提示和「立即生成」按钮；
+- **开关**：右栏头部的「解析后自动总结」可关闭，偏好保存在 `localStorage('vds-auto-summary')`；关闭只影响下一次解析，不取消进行中的任务；
+- **移动端**：<1024px 回退单列，顺序为视频信息 → AI 总结。
+
+> 注意：自动总结会消耗每日额度（默认 3 次/天），自测时如需频繁解析，可临时调高 `VDS_SUMMARY_DAILY_LIMIT_PER_IP`。
+
 ## AI 视频总结（DeepSeek）
 
-解析成功后，结果面板下方会出现「AI 视频总结」卡片。点击生成后，后端按以下流程处理：
+解析成功后，右栏会自动开始生成总结（也可关闭自动开关后手动点击）。后端按以下流程处理：
 
 1. **逐字稿**：优先下载平台字幕（VTT/SRT/ASS/Bilibili JSON/YouTube json3）；没有字幕时下载音频，按 60 秒分片调用 DeepSeek ASR；
 2. **结构化总结**：`deepseek-flash` 输出 JSON，服务端校验时间戳、章节、要点，并生成 Markdown；
-3. **前端展示**：总结 / 章节 / 文稿 / 思维导图 / 问答五个标签页；总结页默认渲染 Markdown 笔记（目录、标题层级、引用、列表、表格、可点击时间戳），可一键切回卡片视图；章节和文稿时间戳可跳转到在线预览播放器；思维导图使用 `markmap-view` 渲染，支持彩色分支、缩放、拖拽、节点折叠、全屏和 PNG/SVG 导出；
-4. **导出**：复制 Markdown、下载 `.md` 笔记；文稿页可下载 SRT / VTT / TXT / Markdown 字幕。
+3. **等待与呈现**：生成期间不显示进度条，只显示跳动圆点、「正在总结中…」、阶段文案与取消；完成后直接打开结果界面，已生成的 Markdown 通过 SSE 按块打出（打字机效果）；
+4. **前端展示**：总结 / 章节 / 文稿 / 思维导图 / 问答五个标签页；总结页默认渲染 Markdown 笔记（目录、标题层级、引用、列表、表格、可点击时间戳），可一键切回卡片视图；章节和文稿时间戳可跳转到在线预览播放器；思维导图使用 `markmap-view` 渲染，支持彩色分支、缩放、拖拽、节点折叠、全屏和 PNG/SVG 导出；
+5. **导出**：复制 Markdown、下载 `.md` 笔记；文稿页可下载 SRT / VTT / TXT / Markdown 字幕。
 
 限制与行为：
 
@@ -141,7 +165,7 @@ npm run build    # 产物在 frontend/dist，后端启动时自动挂载
 - 任务与缓存都在内存中，重启后端后丢失；临时音频在任务结束后立即删除；
 - 只向 DeepSeek 发送音频分片与逐字稿文本，不发送视频文件、不保存用户 Cookie。
 
-接口：`GET /api/summary/config`、`POST /api/summary`、`GET /api/summary/{id}`、`GET /api/summary/{id}/transcript`、`GET /api/summary/{id}/subtitles`、`DELETE /api/summary/{id}`。
+接口：`GET /api/summary/config`、`POST /api/summary`、`GET /api/summary/{id}`、`GET /api/summary/{id}/stream`、`GET /api/summary/{id}/transcript`、`GET /api/summary/{id}/subtitles`、`DELETE /api/summary/{id}`。其中 `/stream` 返回 SSE：`state` / `meta` / `delta` / `done` / `error` / `cancelled` / `gone`。
 
 ### Markdown 笔记与字幕下载
 
@@ -213,7 +237,15 @@ cd backend
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出与转义、字幕文件导出（SRT/VTT/TXT/MD 与 404/409/422）、任务缓存/额度/取消、API 错误映射，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **95 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py`、`tests/qa_browser_e2e.py` 与 `tests/content_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。
+AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出与转义、字幕文件导出（SRT/VTT/TXT/MD 与 404/409/422）、任务缓存/额度/取消、API 错误映射、总结 SSE 事件/分块/断连/空 Markdown，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **110 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py`、`tests/qa_browser_e2e.py`、`tests/content_e2e.py`、`tests/workspace_e2e.py` 与 `tests/degraded_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。总结流与等高工作台验收：
+
+```powershell
+cd backend
+# 推荐 Mock：后端设置 VDS_DEEPSEEK_BASE_URL=http://127.0.0.1:8100、VDS_DEEPSEEK_API_KEY=mock
+.venv\Scripts\python.exe -m tests.workspace_e2e   # 产物写入 runtime/proof/v0.8-*
+```
+
+详细契约、失败模式与实测记录见 [v0.8 总结流设计](docs/v0.8-streaming-summary-design.md)。
 
 ## 免责声明
 

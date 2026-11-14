@@ -33,6 +33,48 @@ const previewMessage = ref('')
 const previewTaskId = ref('')
 const resultPanelRef = ref<{ seekTo: (seconds: number) => void } | null>(null)
 const pendingSeek = ref<number | null>(null)
+const workspaceRef = ref<HTMLElement | null>(null)
+const summaryAvailable = ref(true)
+const summaryTaskId = ref('')
+
+const AUTO_SUMMARY_KEY = 'vds-auto-summary'
+
+function readAutoSummary(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_SUMMARY_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+const autoSummary = ref(readAutoSummary())
+
+watch(autoSummary, (value) => {
+  try {
+    window.localStorage.setItem(AUTO_SUMMARY_KEY, value ? 'on' : 'off')
+  } catch {
+    /* 隐私模式下 localStorage 不可用，忽略即可 */
+  }
+})
+
+async function loadSummaryAvailability() {
+  try {
+    const config = await api.summaryConfig()
+    summaryAvailable.value = config.enabled
+  } catch {
+    /* 配置不可读时保持双栏，由总结面板自行提示具体错误 */
+    summaryAvailable.value = true
+  }
+}
+
+function scrollToWorkspace() {
+  void nextTick(() => {
+    const element = workspaceRef.value
+    if (!element) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    element.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  })
+}
 
 let pollTimer: number | undefined
 let autoSavedTask = ''
@@ -49,11 +91,9 @@ const platforms = [
   '抖音',
   'TikTok',
   '小红书',
-  'Instagram',
-  'X / Twitter',
-  'Vimeo',
   '快手',
   '视频号',
+  'X / Twitter',
 ]
 
 const features = [
@@ -289,6 +329,16 @@ async function analyze() {
   }
   stopPolling()
   resetPreview()
+  if (summaryTaskId.value) {
+    const previous = summaryTaskId.value
+    summaryTaskId.value = ''
+    try {
+      // 先释放上一条总结任务占用的并发槽位，避免新视频自动总结时偶发 429
+      await api.deleteSummary(previous)
+    } catch {
+      /* 任务可能已结束或已过期 */
+    }
+  }
   loading.value = true
   errorMsg.value = ''
   noticeMsg.value = ''
@@ -306,6 +356,7 @@ async function analyze() {
     if (first && !first.audio_only && canPlayDirect(first)) {
       void preparePreview(true)
     }
+    scrollToWorkspace()
   } catch (err) {
     errorMsg.value = errorText(err)
   } finally {
@@ -456,6 +507,7 @@ async function cancelTask(taskId: string) {
 }
 
 onMounted(() => {
+  void loadSummaryAvailability()
   const shared = new URLSearchParams(window.location.search).get('url')
   if (shared) {
     url.value = shared
@@ -474,7 +526,7 @@ onBeforeUnmount(() => {
 <template>
   <div id="top">
     <!-- Hero -->
-    <section class="relative overflow-hidden pb-10 pt-14 sm:pt-20">
+    <section class="relative overflow-hidden pb-6 pt-6 sm:pt-8">
       <div class="pointer-events-none absolute inset-0 -z-10">
         <div class="absolute left-1/2 top-[-14rem] h-[28rem] w-[42rem] -translate-x-1/2 rounded-full bg-brand-200/40 blur-[120px]" />
         <div class="absolute right-[-8rem] top-24 h-72 w-72 rounded-full bg-violet-200/40 blur-[100px]" />
@@ -489,15 +541,15 @@ onBeforeUnmount(() => {
           支持上千个平台 · 解析服务运行中
         </span>
 
-        <h1 class="mt-6 text-[34px] font-black leading-[1.15] tracking-tight text-ink-900 text-balance sm:text-5xl">
+        <h1 class="mt-4 text-[34px] font-black leading-[1.15] tracking-tight text-ink-900 text-balance sm:text-5xl">
           粘贴链接，<span class="text-gradient">3 秒拿到原片</span>
         </h1>
-        <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
+        <p class="mx-auto mt-3 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
           YouTube、Bilibili、抖音、TikTok 等站点一键解析。音视频自动合并后直接下载到本机，也支持服务端暂存，手机电脑都能用。
         </p>
 
         <!-- Search -->
-        <form id="download" class="mt-8" @submit.prevent="analyze">
+        <form id="download" class="mt-5" @submit.prevent="analyze">
           <div class="card flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:rounded-full">
             <label class="flex flex-1 items-center gap-3 px-3">
               <svg class="h-5 w-5 shrink-0 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -522,27 +574,27 @@ onBeforeUnmount(() => {
           </div>
         </form>
 
-        <div class="mt-4 min-h-[20px]">
-          <p v-if="errorMsg" class="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+        <div class="mt-2 min-h-[18px]">
+          <p v-if="errorMsg && !result" class="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
             {{ errorMsg }}
           </p>
-          <p v-else-if="noticeMsg" class="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">
+          <p v-else-if="noticeMsg && !result" class="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">
             {{ noticeMsg }}
           </p>
         </div>
 
-        <div class="mt-6 flex flex-wrap items-center justify-center gap-2">
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
           <span
             v-for="name in platforms"
             :key="name"
-            class="chip cursor-default text-xs"
+            class="chip cursor-default px-2.5 py-1 text-[11px]"
           >
             {{ name }}
           </span>
-          <span class="chip cursor-default text-xs text-ink-400">+1800 更多</span>
+          <span class="chip cursor-default px-2.5 py-1 text-[11px] text-ink-400">+1800 更多</span>
         </div>
 
-        <dl class="mx-auto mt-8 grid max-w-lg grid-cols-3 divide-x divide-slate-200 rounded-2xl border border-slate-200/70 bg-white/70 py-3 text-center shadow-soft">
+        <dl class="mx-auto mt-5 grid max-w-lg grid-cols-3 divide-x divide-slate-200 rounded-2xl border border-slate-200/70 bg-white/70 py-2.5 text-center shadow-soft">
           <div>
             <dt class="text-[11px] text-ink-400">已解析</dt>
             <dd class="mt-0.5 text-base font-bold text-ink-900">128,436</dd>
@@ -559,40 +611,75 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <div class="mx-auto max-w-3xl px-4 sm:px-6">
-      <ResultPanel
-        v-if="result"
-        ref="resultPanelRef"
-        :result="result"
-        :selected-id="selectedId"
-        :busy-option="busyOption"
-        :busy-mode="busyMode"
-        :remove-watermark="removeWatermark"
-        :preview-status="previewStatus"
-        :preview-url="previewUrl"
-        :preview-progress="previewProgress"
-        :preview-message="previewMessage"
-        @select="selectOption"
-        @preview="preparePreview()"
-        @server="startServer"
-        @local="downloadLocal"
-        @direct="directDownload"
-        @toggle-watermark="removeWatermark = $event"
-      />
+    <div
+      v-if="result"
+      id="workspace"
+      ref="workspaceRef"
+      class="mx-auto scroll-mt-20 px-4 sm:px-6"
+      :class="summaryAvailable ? 'max-w-[1400px]' : 'max-w-3xl'"
+    >
+      <div v-if="errorMsg || noticeMsg" class="mb-4 space-y-2">
+        <p v-if="errorMsg" class="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+          {{ errorMsg }}
+        </p>
+        <p v-if="noticeMsg" class="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">
+          {{ noticeMsg }}
+        </p>
+      </div>
 
-      <TaskProgress v-if="task" :task="task" :title="taskTitle" :mode="taskMode" @cancel="cancelTask" />
+      <div
+        class="grid gap-5"
+        :class="
+          summaryAvailable
+            ? 'lg:h-[calc(100vh-5.5rem)] lg:supports-[height:100dvh]:h-[calc(100dvh-5.5rem)] lg:grid-cols-[minmax(340px,420px)_minmax(0,1fr)] lg:items-stretch'
+            : ''
+        "
+      >
+        <div
+          class="min-w-0 space-y-5"
+          :class="
+            summaryAvailable
+              ? 'lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:overscroll-contain lg:pr-1'
+              : ''
+          "
+        >
+          <ResultPanel
+            ref="resultPanelRef"
+            class="lg:min-h-0 lg:flex-1"
+            :result="result"
+            :selected-id="selectedId"
+            :busy-option="busyOption"
+            :busy-mode="busyMode"
+            :remove-watermark="removeWatermark"
+            :preview-status="previewStatus"
+            :preview-url="previewUrl"
+            :preview-progress="previewProgress"
+            :preview-message="previewMessage"
+            @select="selectOption"
+            @preview="preparePreview()"
+            @server="startServer"
+            @local="downloadLocal"
+            @direct="directDownload"
+            @toggle-watermark="removeWatermark = $event"
+          />
 
-      <AiSummaryPanel
-        v-if="result"
-        :key="result.url"
-        :result="result"
-        :seekable="Boolean(selectedOption && !selectedOption.audio_only)"
-        @seek="summarySeek"
-      />
+          <TaskProgress v-if="task" :task="task" :title="taskTitle" :mode="taskMode" @cancel="cancelTask" />
+        </div>
+
+        <AiSummaryPanel
+          :key="result.url"
+          :result="result"
+          :auto-start="autoSummary"
+          :seekable="Boolean(selectedOption && !selectedOption.audio_only)"
+          @seek="summarySeek"
+          @update:auto-summary="autoSummary = $event"
+          @task-change="summaryTaskId = $event || ''"
+        />
+      </div>
     </div>
 
     <!-- Features -->
-    <section id="platforms" class="mx-auto max-w-6xl px-4 pt-20 sm:px-6">
+    <section id="platforms" class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
       <div class="mx-auto max-w-2xl text-center">
         <p class="text-sm font-semibold uppercase tracking-wider text-brand-700">为什么选我们</p>
         <h2 class="mt-2 text-3xl font-bold tracking-tight text-ink-900 text-balance">
@@ -613,7 +700,7 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- Steps -->
-    <section class="mx-auto max-w-6xl px-4 pt-20 sm:px-6">
+    <section class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
       <ul class="grid grid-cols-1 gap-5 md:grid-cols-3">
         <li v-for="step in steps" :key="step.no" class="card p-6">
           <span class="text-2xl font-black text-brand-200">{{ step.no }}</span>

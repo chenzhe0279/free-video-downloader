@@ -225,6 +225,22 @@ export interface QaErrorEvent {
   message: string
 }
 
+export interface SummaryStreamState {
+  status: string
+  stage: string
+  message: string | null
+}
+
+export interface SummaryStreamHandlers {
+  onState?: (state: SummaryStreamState) => void
+  onMeta?: (task: SummaryTaskStatus) => void
+  onDelta?: (text: string) => void
+  onDone?: (task: SummaryTaskStatus) => void
+  onError?: (message: string) => void
+  onCancelled?: (message: string) => void
+  onGone?: (message: string) => void
+}
+
 const BASE = import.meta.env.VITE_API_BASE ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -289,6 +305,120 @@ export async function streamSummaryAnswer(
   }
 
   return response
+}
+
+/**
+ * 订阅总结任务的 SSE：未完成时收到 state（用于“正在总结中……”），
+ * 完成后先收到 meta，再把已生成好的 Markdown 逐块以 delta 下发。
+ */
+export async function streamSummaryTask(
+  taskId: string,
+  handlers: SummaryStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(`${BASE}/api/summary/${encodeURIComponent(taskId)}/stream`, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw err
+    throw new Error('无法连接服务端，请确认后端已启动')
+  }
+
+  if (!response.ok || !response.body) {
+    let detail = `请求失败（${response.status}）`
+    try {
+      const payload = await response.json()
+      if (payload?.detail) {
+        detail = typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail)
+      }
+    } catch {
+      /* keep default message */
+    }
+    throw new Error(detail)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const dispatch = (block: string) => {
+    let eventName = 'message'
+    let data = ''
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim()
+      } else if (line.startsWith('data:')) {
+        data += line.slice(5).trim()
+      }
+    }
+    if (!data) return
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      return
+    }
+
+    switch (eventName) {
+      case 'state':
+        handlers.onState?.(payload as SummaryStreamState)
+        break
+      case 'meta':
+        handlers.onMeta?.(payload as SummaryTaskStatus)
+        break
+      case 'delta': {
+        const text = (payload as { text?: unknown })?.text
+        if (typeof text === 'string' && text) handlers.onDelta?.(text)
+        break
+      }
+      case 'done':
+        handlers.onDone?.(payload as SummaryTaskStatus)
+        break
+      case 'error':
+        handlers.onError?.(String((payload as { message?: unknown })?.message || '总结失败'))
+        break
+      case 'cancelled':
+        handlers.onCancelled?.(
+          String((payload as { message?: unknown })?.message || '任务已取消'),
+        )
+        break
+      case 'gone':
+        handlers.onGone?.(
+          String((payload as { message?: unknown })?.message || '总结任务不存在或已过期'),
+        )
+        break
+      default:
+        break
+    }
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        if (block.trim() && !block.startsWith(':')) dispatch(block)
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) dispatch(buffer)
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* reader 已被取消时释放可能抛错，忽略即可 */
+    }
+  }
 }
 
 function parseDownloadFilename(disposition: string, fallback: string): string {

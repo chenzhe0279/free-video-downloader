@@ -5,6 +5,8 @@
 > 覆盖范围：AI 视频总结 + Markmap 思维导图；视频内 AI 问答见 [AI 问答设计](./ai-qa-design.md)
 > 关联文档：[需求分析](./requirements.md) · [实现总结](./implementation-summary.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
 
+> **v0.8 更新（2026-11-14）**：新增 `GET /api/summary/{task_id}/stream`，前端改为「思考态 + SSE 打字机」，不再展示进度条；模型仍一次返回完整 JSON，SSE 只回放已校验的 Markdown。详见 [v0.8 总结流与等高工作台设计](./v0.8-streaming-summary-design.md)。
+
 ---
 
 ## 1. 结论
@@ -13,7 +15,7 @@
 
 **平台字幕优先 → 无字幕时 DeepSeek ASR 分片识别 → `deepseek-flash` 结构化总结 → 前端可视化与时间戳跳转。**
 
-本期交付：TL;DR、章节大纲、核心要点、关键概念、完整文稿、思维导图、Markdown 复制/下载、生成进度/取消、缓存与额度控制。默认单视频 ≤2 小时、每 IP 每天 3 次；所有限制可通过 `VDS_*` 环境变量调整。
+本期交付：TL;DR、章节大纲、核心要点、关键概念、完整文稿、思维导图、Markdown 复制/下载、思考态/取消（v0.8 起不展示进度条）、缓存与额度控制。默认单视频 ≤2 小时、每 IP 每天 3 次；所有限制可通过 `VDS_*` 环境变量调整。
 
 核心业务逻辑全部放在新文件；只对现有项目做最小接线（路由注册、组件挂载、seek 暴露、API 客户端新增导出）。
 
@@ -196,7 +198,7 @@ POST /api/summary
 | ASR | DeepSeek 官方 ASR，60s 分片 | 官方上限 120 秒；60 秒换取 1 分钟级时间戳，成本不变 |
 | 时间戳 | 字幕用原时间戳；ASR 用分片起点 | ASR 无词级时间戳，1 分钟粒度足够章节定位 |
 | 任务模型 | 内存任务 + 轮询 | 与现有 TaskManager 一致；无数据库约束 |
-| 流式输出 | 不做 token 流式 | 总结 JSON 需要完整校验；轮询实现简单稳定 |
+| 流式输出 | 不做 LLM token 流式；v0.8 完成后按块回放 Markdown（呈现层流式） | 总结 JSON 需要完整校验；SSE 只影响呈现，失败仍回退轮询 |
 | 长文处理 | 单次 1M 上下文调用 | 2 小时逐字稿约 3 万字，远低于上限；避免 map-reduce 复杂度 |
 | 依赖 | 后端零新增 Python 依赖；前端新增 `markmap-view` | httpx/yt-dlp/Pydantic 已具备；思维导图使用 Markmap 才能达到竞品同款分支/连线效果 |
 
@@ -232,6 +234,7 @@ backend/.env.example         # 新配置示例
 | GET | `/api/summary/config` | 是否启用、模型、时长/额度限制；不暴露 Key |
 | POST | `/api/summary` | 创建总结任务；body `{url, force?}`；返回 202 `{task_id, status, cached}` |
 | GET | `/api/summary/{task_id}` | 任务状态、进度、阶段、统计、完成后的 summary |
+| GET | `/api/summary/{task_id}/stream` | v0.8：SSE 状态与内容流；`state/meta/delta/done/error/cancelled/gone`；未完成只推状态、不展示进度；完成后分块回放 Markdown |
 | GET | `/api/summary/{task_id}/transcript` | 按需取完整文稿分段，避免轮询包过大 |
 | DELETE | `/api/summary/{task_id}` | 取消/删除任务并清理临时文件 |
 

@@ -4,6 +4,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from app.deps import client_ip, enforce_rate
 from app.security import SlidingWindowLimiter, UnsafeUrlError, validate_public_url
@@ -23,6 +24,7 @@ from app.services.summary.schemas import (
     SummaryTranscriptResponse,
 )
 from app.services.summary.settings import get_summary_settings
+from app.services.summary.stream import summary_event_stream
 from app.services.summary.tasks import summary_manager
 
 router = APIRouter(prefix="/api/summary", tags=["summary"])
@@ -114,6 +116,26 @@ async def get_summary_task(task_id: str) -> SummaryTaskStatus:
     if task is None:
         raise HTTPException(status_code=404, detail="总结任务不存在或已过期")
     return summary_manager.serialize(task)
+
+
+@router.get(
+    "/{task_id}/stream",
+    summary="AI 总结进度与内容流（SSE）",
+    response_class=StreamingResponse,
+)
+async def stream_summary_task(task_id: str, request: Request) -> StreamingResponse:
+    """不展示进度条：未完成推状态，完成后把已生成的 Markdown 逐块下发。"""
+    if summary_manager.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="总结任务不存在或已过期")
+    return StreamingResponse(
+        summary_event_stream(task_id, request, get_summary_settings()),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get(

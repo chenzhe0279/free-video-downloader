@@ -40,7 +40,7 @@ const navs = [
         >
           登录
         </button>
-        <a href="#pricing" class="vip-cta px-4 py-2 text-sm">开通会员</a>
+        <a href="#pricing" class="pro-cta" aria-label="升级 Pro，查看会员权益">升级 Pro</a>
       </div>
     </div>
   </header>

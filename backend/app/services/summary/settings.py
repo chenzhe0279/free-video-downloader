@@ -46,6 +46,22 @@ class SummarySettings(BaseSettings):
     summary_thinking_enabled: bool = False
     summary_asr_price_per_hour_cny: float = 0.78
 
+    # ---- 进度/内容流（SSE） ----
+    # 前端不展示进度条：未完成时只推送状态文案，完成后把 Markdown 逐块下发
+    summary_stream_poll_seconds: float = 0.8
+    summary_stream_chunk_chars: int = 48
+    summary_stream_interval_ms: int = 35
+
+    @field_validator("summary_stream_interval_ms")
+    @classmethod
+    def _clamp_stream_interval(cls, value: int) -> int:
+        return max(0, min(200, int(value)))
+
+    @field_validator("summary_stream_chunk_chars")
+    @classmethod
+    def _clamp_stream_chunk(cls, value: int) -> int:
+        return max(16, min(400, int(value)))
+
     # ---- 视频内 AI 问答 ----
     qa_enabled: bool = True
     qa_rate_limit_per_minute: int = 10

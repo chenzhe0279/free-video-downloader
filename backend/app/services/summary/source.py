@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,19 @@ from app.config import resolve_ffmpeg
 from app.security import UnsafeUrlError, validate_public_url
 from app.services.summary.settings import get_summary_settings
 
+logger = logging.getLogger("vds.summary.source")
+
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _INFO_TTL_SECONDS = 1200
 _INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+# B 站等平台的 PCDN 节点（mcdn.bilivideo.cn:8082）偶尔会拒绝连接；
+# 失败一次后重新解析（可能换到另一个节点）并降低音轨码率，能显著提高成功率。
+_AUDIO_FORMATS = ("bestaudio/best", "worstaudio/best")
+_AUDIO_RETRY_DELAY_SECONDS = 1.5
 
 
 class SourceError(Exception):
@@ -70,41 +78,78 @@ def _find_downloaded(target_dir: Path, stem: str) -> Path | None:
     return None
 
 
+def _cleanup_audio_files(target_dir: Path) -> None:
+    for path in target_dir.glob("audio.*"):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _download_audio_sync(url: str, target_dir: Path, max_bytes: int) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
-    opts = {
-        **_base_ydl_opts(),
-        "format": "bestaudio/best",
-        "outtmpl": str(target_dir / "audio.%(ext)s"),
-        "max_filesize": max_bytes,
-        "retries": 3,
-        "concurrent_fragment_downloads": 2,
-        "noprogress": True,
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as exc:
-        message = str(exc)
-        if "larger than max" in message.lower():
-            raise SourceError("音频文件超过大小上限，暂不支持总结") from exc
-        raise SourceError(f"音频下载失败：{message}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        raise SourceError(f"音频下载异常：{exc}") from exc
+    last_error = "音频下载失败"
+    for attempt, audio_format in enumerate(_AUDIO_FORMATS, start=1):
+        opts = {
+            **_base_ydl_opts(),
+            "format": audio_format,
+            "outtmpl": str(target_dir / "audio.%(ext)s"),
+            "max_filesize": max_bytes,
+            "retries": 3,
+            "concurrent_fragment_downloads": 2,
+            "noprogress": True,
+        }
+        info: dict[str, Any] | None = None
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                extracted = ydl.extract_info(url, download=True)
+            if isinstance(extracted, dict):
+                info = extracted
+        except yt_dlp.utils.DownloadError as exc:
+            message = str(exc)
+            last_error = message
+            if "larger than max" in message.lower():
+                raise SourceError("音频文件超过大小上限，暂不支持总结") from exc
+            _cleanup_audio_files(target_dir)
+            if attempt < len(_AUDIO_FORMATS):
+                logger.info(
+                    "音频下载失败，重新解析后重试（%d/%d，format=%s）：%s",
+                    attempt + 1,
+                    len(_AUDIO_FORMATS),
+                    audio_format,
+                    message[:300],
+                )
+                time.sleep(_AUDIO_RETRY_DELAY_SECONDS)
+                continue
+            raise SourceError(f"音频下载失败：{message}") from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            raise SourceError(f"音频下载异常：{exc}") from exc
 
-    path = _find_downloaded(target_dir, "audio")
-    if path is None and isinstance(info, dict):
-        for entry in info.get("requested_downloads") or []:
-            candidate = entry.get("filepath") if isinstance(entry, dict) else None
-            if candidate and Path(candidate).is_file():
-                path = Path(candidate)
-                break
-    if path is None or path.stat().st_size <= 0:
-        raise SourceError("音频下载完成但没有找到文件")
-    if path.stat().st_size > max_bytes:
-        path.unlink(missing_ok=True)
-        raise SourceError("音频文件超过大小上限，暂不支持总结")
-    return path
+        path = _find_downloaded(target_dir, "audio")
+        if path is None and info is not None:
+            for entry in info.get("requested_downloads") or []:
+                candidate = entry.get("filepath") if isinstance(entry, dict) else None
+                if candidate and Path(candidate).is_file():
+                    path = Path(candidate)
+                    break
+        if path is None or path.stat().st_size <= 0:
+            last_error = "音频下载完成但没有找到文件"
+            _cleanup_audio_files(target_dir)
+            if attempt < len(_AUDIO_FORMATS):
+                logger.info(
+                    "音频下载后未找到文件，重新解析后重试（%d/%d）",
+                    attempt + 1,
+                    len(_AUDIO_FORMATS),
+                )
+                time.sleep(_AUDIO_RETRY_DELAY_SECONDS)
+                continue
+            raise SourceError(last_error)
+        if path.stat().st_size > max_bytes:
+            path.unlink(missing_ok=True)
+            raise SourceError("音频文件超过大小上限，暂不支持总结")
+        return path
+
+    raise SourceError(f"音频下载失败：{last_error}")
 
 
 async def download_audio(url: str, target_dir: Path, max_bytes: int | None = None) -> Path:

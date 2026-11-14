@@ -126,11 +126,10 @@ async def run() -> int:
 
         # 2. 选择一个较轻量的清晰度，便于预览跳转
         await cdp.eval(
-            "(() => { const items = [...document.querySelectorAll('#result li')];"
-            " const target = items.find((li) => li.innerText.includes('360P'))"
-            " || items.find((li) => li.innerText.includes('480P')) || items[0];"
-            " if (!target) return false; const button = target.querySelector('button');"
-            " button?.click(); return target.innerText.slice(0, 80); })()"
+            "(() => { const chips = [...document.querySelectorAll('#result [role=radio]')];"
+            " const target = chips.find((b) => b.textContent.includes('360P'))"
+            " || chips.find((b) => b.textContent.includes('480P')) || chips[0];"
+            " if (!target) return false; target.click(); return target.textContent.trim(); })()"
         )
         await asyncio.sleep(1.5)
 

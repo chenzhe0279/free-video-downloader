@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   api,
   downloadSummarySubtitle,
+  streamSummaryTask,
   type ProbeResult,
   type SubtitleFormat,
   type SummaryConfig,
+  type SummaryStreamState,
   type SummaryTaskStatus,
   type SummaryTranscriptSegment,
 } from '../api/client'
@@ -14,14 +16,18 @@ import { safeFilename, saveBlob } from '../utils/download'
 import MarkdownNote from './MarkdownNote.vue'
 import MindmapViewer from './MindmapViewer.vue'
 import QaChatPanel from './QaChatPanel.vue'
+import SummaryTabIcon from './SummaryTabIcon.vue'
 
 const props = defineProps<{
   result: ProbeResult
   seekable: boolean
+  autoStart: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'seek', seconds: number): void
+  (e: 'update:autoSummary', value: boolean): void
+  (e: 'task-change', taskId: string | null): void
 }>()
 
 type TabKey = 'summary' | 'chapters' | 'transcript' | 'mindmap' | 'qa'
@@ -51,6 +57,17 @@ const copied = ref(false)
 const subtitleFormat = ref<SubtitleFormat>('srt')
 const subtitleDownloading = ref(false)
 const subtitleError = ref('')
+const autoStarted = ref(false)
+const autoNotice = ref('')
+const autoNoticeRetryable = ref(false)
+
+// 生成过程不再展示进度条：只用 state 事件驱动“正在总结中……”的思考动画，
+// 总结就绪后由 meta + delta 把内容逐步流出来。
+const streaming = ref(false)
+const streamText = ref('')
+const streamStage = ref('')
+const streamMessage = ref<string | null>(null)
+const activeTaskId = ref('')
 
 const subtitleFormats: { value: SubtitleFormat; label: string }[] = [
   { value: 'srt', label: 'SRT 字幕' },
@@ -73,11 +90,13 @@ const summaryView = ref<SummaryView>(readSummaryView())
 
 let pollTimer: number | undefined
 let elapsedTimer: number | undefined
+let streamController: AbortController | null = null
 
 const summary = computed(() => task.value?.summary ?? null)
-const effectiveSummaryView = computed<SummaryView>(() =>
-  summaryView.value === 'note' && summary.value?.markdown?.trim() ? 'note' : 'cards',
-)
+const effectiveSummaryView = computed<SummaryView>(() => {
+  if (streaming.value && summary.value?.markdown?.trim()) return 'note'
+  return summaryView.value === 'note' && summary.value?.markdown?.trim() ? 'note' : 'cards'
+})
 
 function setSummaryView(view: SummaryView) {
   summaryView.value = view
@@ -99,7 +118,7 @@ const qaSuggestions = computed(() => {
   return [...new Set(items)].slice(0, 4)
 })
 const isBusy = computed(() => {
-  if (starting.value) return true
+  if (starting.value || streaming.value) return true
   const status = task.value?.status
   return (
     status === 'queued' ||
@@ -108,10 +127,26 @@ const isBusy = computed(() => {
     status === 'summarizing'
   )
 })
-const progress = computed(() => Math.max(0, Math.min(100, task.value?.progress ?? 0)))
-const stageText = computed(() => task.value?.stage || '准备中')
-const statusMessage = computed(() => task.value?.message || '')
+// 总结还没就绪（或在创建任务）时展示“正在总结中……”，不再有进度百分比
+const thinking = computed(() => starting.value || (streaming.value && !summary.value))
+const thinkingTitle = computed(() =>
+  starting.value ? '正在创建总结任务' : '正在总结中',
+)
+const thinkingDetail = computed(
+  () =>
+    streamMessage.value ||
+    (streamStage.value ? `${streamStage.value}…` : '正在准备视频与逐字稿…'),
+)
 const taskError = computed(() => task.value?.error || errorMsg.value)
+// 供 E2E 与样式使用的稳定阶段标记：starting → thinking → streaming → done/error/cancelled
+const summaryPhase = computed(() => {
+  if (starting.value) return 'starting'
+  if (streaming.value) return summary.value ? 'streaming' : 'thinking'
+  if (task.value?.status === 'error' || errorMsg.value) return 'error'
+  if (task.value?.status === 'cancelled') return 'cancelled'
+  if (task.value?.status === 'finished') return 'done'
+  return 'idle'
+})
 const sourceLabel = computed(() => {
   if (task.value?.transcript_source === 'subtitle') return '平台字幕'
   if (task.value?.transcript_source === 'asr') return 'AI 语音识别'
@@ -183,10 +218,57 @@ async function loadConfig() {
   try {
     config.value = await api.summaryConfig()
     configState.value = 'ready'
+    void maybeAutoGenerate()
   } catch (err) {
     configState.value = 'error'
     configError.value = errorText(err)
   }
+}
+
+// 前端可提前判定的“不可能成功”场景，直接拦下，避免无谓的额度消耗与报错噪音。
+function autoBlockReason(): string {
+  if (props.result.is_playlist) {
+    return '合集/播放列表暂不支持 AI 总结，请粘贴单个视频链接。'
+  }
+  const limit = config.value?.max_duration_seconds ?? 0
+  const duration = props.result.duration
+  if (limit > 0 && duration && duration > limit) {
+    return `视频约 ${Math.round(duration / 60)} 分钟，超过 AI 总结上限 ${Math.round(limit / 60)} 分钟。`
+  }
+  return ''
+}
+
+async function maybeAutoGenerate() {
+  if (autoStarted.value) return
+  autoStarted.value = true
+  if (!props.autoStart) return
+  if (!config.value?.enabled) return
+  const blocked = autoBlockReason()
+  if (blocked) {
+    autoNotice.value = blocked
+    autoNoticeRetryable.value = false
+    return
+  }
+  await generate(false, { automatic: true })
+}
+
+function softAutoFailure(message: string): boolean {
+  return [
+    '已达上限',
+    '未启用',
+    '暂不支持',
+    '无法确定视频时长',
+    '超过 AI 总结上限',
+    '无法连接服务端',
+  ].some((keyword) => message.includes(keyword))
+}
+
+function autoFailureRetryable(message: string): boolean {
+  return (
+    message.includes('已达上限') ||
+    message.includes('无法连接服务端') ||
+    message.includes('请稍后再试')
+  )
 }
 
 async function loadTranscript() {
@@ -229,52 +311,168 @@ async function tick(taskId: string) {
   }
   if (data.status === 'finished') {
     stopPolling()
-    stopElapsed()
+    finishStream()
     activeTab.value = 'summary'
     void loadTranscript()
     return
   }
   if (data.status === 'error' || data.status === 'cancelled') {
     stopPolling()
-    stopElapsed()
+    finishStream()
     return
   }
   schedulePoll(taskId)
 }
 
-async function generate(force = false) {
+function stopStream() {
+  if (streamController !== null) {
+    streamController.abort()
+    streamController = null
+  }
+}
+
+function finishStream() {
+  stopStream()
+  streaming.value = false
+  streamText.value = ''
+  streamStage.value = ''
+  streamMessage.value = null
+  stopElapsed()
+}
+
+function resetStreamState() {
+  streaming.value = false
+  streamText.value = ''
+  streamStage.value = ''
+  streamMessage.value = null
+  activeTaskId.value = ''
+}
+
+function applyState(state: SummaryStreamState) {
+  if (state.stage) streamStage.value = state.stage
+  streamMessage.value = state.message ?? null
+}
+
+/**
+ * 连上进度流：未完成时只更新“正在总结中……”的文案；
+ * meta 到达后立刻渲染成品界面，delta 把 Markdown 逐块吐出来。
+ */
+async function attachStream(taskId: string) {
+  stopStream()
+  streaming.value = true
+  streamText.value = ''
+  streamStage.value = '准备总结'
+  streamMessage.value = null
+  activeTaskId.value = taskId
+  emit('task-change', taskId)
+
+  const controller = new AbortController()
+  streamController = controller
+  let terminalEvent = false
+  try {
+    await streamSummaryTask(
+      taskId,
+      {
+        onState: applyState,
+        onMeta(meta) {
+          task.value = meta
+          // meta 到达即进入结果态，思考计时不再有意义
+          stopElapsed()
+        },
+        onDelta(text) {
+          streamText.value += text
+        },
+        onDone(final) {
+          terminalEvent = true
+          task.value = final
+          finishStream()
+          activeTab.value = 'summary'
+          void loadTranscript()
+        },
+        onError(message) {
+          terminalEvent = true
+          finishStream()
+          autoNotice.value = ''
+          errorMsg.value = message
+        },
+        onCancelled(message) {
+          terminalEvent = true
+          finishStream()
+          resetStreamState()
+          task.value = null
+          autoNotice.value = message
+          autoNoticeRetryable.value = false
+        },
+        onGone(message) {
+          terminalEvent = true
+          finishStream()
+          resetStreamState()
+          task.value = null
+          errorMsg.value = message
+        },
+      },
+      controller.signal,
+    )
+    if (!terminalEvent && streaming.value) {
+      // 代理/服务端可能在未发终态事件时提前关闭连接：回退轮询，避免停在“正在输出”
+      schedulePoll(taskId)
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') return
+    // 流式接口不可用时回退到轮询，避免一直停在思考动画
+    if (task.value?.status !== 'finished') {
+      schedulePoll(taskId)
+    } else {
+      finishStream()
+    }
+  } finally {
+    if (streamController === controller) streamController = null
+  }
+}
+
+async function generate(force = false, options: { automatic?: boolean } = {}) {
   if (isBusy.value) return
   errorMsg.value = ''
+  autoNotice.value = ''
+  autoNoticeRetryable.value = false
   copied.value = false
   if (force) {
     task.value = null
     transcript.value = null
     transcriptError.value = ''
+    resetStreamState()
   }
   starting.value = true
   activeTab.value = 'summary'
   startElapsed()
+
+  let taskId = ''
   try {
     const created = await api.createSummary(props.result.url, force)
-    const data = await refreshTask(created.task_id)
-    if (created.status === 'finished' || data?.status === 'finished') {
-      stopElapsed()
-      activeTab.value = 'summary'
-      void loadTranscript()
-      return
-    }
-    schedulePoll(created.task_id)
+    taskId = created.task_id
   } catch (err) {
     stopTimers()
-    errorMsg.value = errorText(err)
-  } finally {
     starting.value = false
+    const message = errorText(err)
+    if (options.automatic && softAutoFailure(message)) {
+      // 自动触发的可预期失败：用中性提示，不占用红色错误位
+      autoNotice.value = message
+      autoNoticeRetryable.value = autoFailureRetryable(message)
+    } else {
+      errorMsg.value = message
+    }
+    return
   }
+
+  starting.value = false
+  void attachStream(taskId)
 }
 
 async function cancel() {
-  const taskId = task.value?.task_id
+  const taskId = task.value?.task_id || activeTaskId.value
   stopTimers()
+  stopStream()
+  resetStreamState()
   if (taskId) {
     try {
       await api.deleteSummary(taskId)
@@ -286,6 +484,9 @@ async function cancel() {
   transcript.value = null
   transcriptError.value = ''
   errorMsg.value = ''
+  autoNotice.value = ''
+  autoNoticeRetryable.value = false
+  emit('task-change', null)
 }
 
 function selectTab(tab: TabKey) {
@@ -375,39 +576,62 @@ async function downloadSubtitle() {
   }
 }
 
+watch(
+  () => task.value?.task_id ?? null,
+  (taskId) => emit('task-change', taskId),
+)
+
+function onAutoToggle(event: Event) {
+  emit('update:autoSummary', (event.target as HTMLInputElement).checked)
+}
+
 onMounted(() => {
   void loadConfig()
 })
 
 onBeforeUnmount(() => {
   stopTimers()
-  if (isBusy.value && task.value) {
-    void api.deleteSummary(task.value.task_id).catch(() => {})
+  stopStream()
+  emit('task-change', null)
+  const taskId = task.value?.task_id || activeTaskId.value
+  if (isBusy.value && taskId) {
+    void api.deleteSummary(taskId).catch(() => {})
   }
 })
 </script>
 
 <template>
-  <section id="ai-summary" class="scroll-mt-20 mt-6 card animate-float-in overflow-hidden">
-    <div class="border-b border-violet-100 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-white px-5 py-4">
+  <section
+    id="ai-summary"
+    :data-summary-phase="summaryPhase"
+    class="card min-w-0 scroll-mt-20 animate-float-in lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden"
+  >
+    <div class="rounded-t-[1rem] border-b border-violet-100 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-white px-4 py-3 sm:px-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex min-w-0 items-start gap-3">
           <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 text-lg text-white shadow-lg shadow-violet-200">
             ✨
           </span>
           <div class="min-w-0">
-            <h3 class="flex flex-wrap items-center gap-2 text-base font-bold text-ink-900">
-              AI 视频总结
-              <span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
-                DeepSeek V4.1 Flash
-              </span>
-            </h3>
+            <h3 class="text-base font-bold text-ink-900">AI 视频总结</h3>
             <p class="mt-0.5 text-xs leading-relaxed text-ink-500">
-              平台字幕优先；没有字幕时自动语音识别。生成带时间戳的章节、要点、文稿和思维导图。
+              平台字幕优先，无字幕时自动语音识别；输出带时间戳的章节、要点、文稿和思维导图。
             </p>
           </div>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-1.5 text-[10px]">
+          <label
+            v-if="config?.enabled"
+            class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-medium text-violet-700"
+          >
+            <input
+              type="checkbox"
+              class="h-3 w-3 accent-violet-600"
+              :checked="props.autoStart"
+              @change="onAutoToggle"
+            />
+            解析后自动总结
+          </label>
           <span class="rounded-full border border-violet-200 bg-white px-2 py-0.5 font-medium text-violet-600">
             单视频 ≤ {{ maxDurationText }}
           </span>
@@ -418,7 +642,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="px-5 py-5">
+    <div data-summary-scroll class="px-4 py-4 sm:px-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:pr-4">
       <!-- 配置加载 -->
       <div v-if="configState === 'loading'" class="space-y-2">
         <div class="h-3 w-2/3 animate-pulse rounded bg-slate-100" />
@@ -452,10 +676,28 @@ onBeforeUnmount(() => {
           {{ errorMsg }}
         </p>
 
+        <div
+          v-if="autoNotice && !task && !starting"
+          class="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800"
+        >
+          <p class="font-semibold">本次没有自动总结</p>
+          <p class="mt-0.5">{{ autoNotice }}</p>
+          <button
+            v-if="autoNoticeRetryable"
+            type="button"
+            class="mt-1.5 font-semibold underline"
+            @click="generate(false)"
+          >
+            立即生成
+          </button>
+        </div>
+
         <!-- 未开始 -->
-        <div v-if="!task && !starting" class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div v-if="!task && !starting && !streaming" class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
-            <p class="text-sm font-semibold text-ink-900">把这条视频变成可复习的笔记</p>
+            <p class="text-sm font-semibold text-ink-900">
+              {{ props.autoStart ? '把这条视频变成可复习的笔记' : '自动总结已关闭，可手动生成' }}
+            </p>
             <p class="mt-1 text-xs leading-relaxed text-ink-500">
               先看 TL;DR 和章节，再按时间戳回看原片。无字幕视频会产生语音识别费用（约 0.4–0.8 元/小时），同一视频 6 小时内重复总结命中缓存。
             </p>
@@ -465,27 +707,29 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- 生成中 -->
-        <div v-else-if="isBusy" class="rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-4">
-          <div class="flex items-center justify-between gap-3">
-            <p class="text-sm font-semibold text-violet-800">
-              {{ starting && !task ? '正在创建总结任务…' : stageText }}
-            </p>
-            <span class="text-xs font-semibold tabular-nums text-violet-600">
-              {{ progress.toFixed(0) }}%
+        <!-- 思考中（AI 大模型式的等待动画，不展示进度条） -->
+        <div
+          v-else-if="thinking"
+          role="status"
+          aria-live="polite"
+          class="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/80 via-white to-white px-4 py-4"
+        >
+          <div class="flex items-center gap-2.5">
+            <span class="thinking-dots text-violet-500" aria-hidden="true">
+              <i /><i /><i />
             </span>
+            <p class="text-sm font-semibold text-violet-800">
+              {{ thinkingTitle }}<span class="thinking-ellipsis">…</span>
+            </p>
+            <span class="ml-auto text-[11px] tabular-nums text-ink-400">{{ elapsedText }}</span>
           </div>
-          <div class="mt-2 h-2 overflow-hidden rounded-full bg-white">
-            <div
-              class="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-500"
-              :style="{ width: `${Math.max(3, progress)}%` }"
-            />
-          </div>
-          <p class="mt-2 text-xs leading-relaxed text-violet-700">
-            {{ statusMessage || '正在准备视频与逐字稿…' }}
+          <p class="mt-2 text-xs leading-relaxed text-violet-600">
+            {{ thinkingDetail }}
           </p>
-          <div class="mt-3 flex items-center justify-between gap-3">
-            <span class="text-[11px] text-ink-400">已用时 {{ elapsedText }}</span>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-[11px] leading-relaxed text-ink-400">
+              本次生成会占用每 IP 每日额度（默认 {{ config.daily_limit_per_ip }} 次/天）；命中缓存不占用额度。
+            </span>
             <button type="button" class="text-xs font-medium text-red-500 hover:text-red-600" @click="cancel">
               取消
             </button>
@@ -505,6 +749,15 @@ onBeforeUnmount(() => {
         <div v-else-if="summary" class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span
+                v-if="streaming"
+                role="status"
+                aria-live="polite"
+                class="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700"
+              >
+                <span class="thinking-dots text-violet-500" aria-hidden="true"><i /><i /><i /></span>
+                正在输出
+              </span>
               <span v-if="sourceLabel" class="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
                 {{ sourceLabel }}
               </span>
@@ -518,7 +771,7 @@ onBeforeUnmount(() => {
                 耗时 {{ task.stats.elapsed_seconds.toFixed(1) }}s
               </span>
             </div>
-            <div class="flex flex-wrap items-center gap-2 text-xs">
+            <div v-if="!streaming" class="flex flex-wrap items-center gap-2 text-xs">
               <button type="button" class="font-medium text-brand-600 hover:text-brand-700" @click="copyMarkdown">
                 {{ copied ? '已复制' : '复制 Markdown' }}
               </button>
@@ -531,16 +784,16 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <p v-if="costText" class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-ink-500">
+          <p v-if="costText && !streaming" class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-ink-500">
             {{ costText }}；AI 生成内容可能有偏差，请结合原视频核对。
           </p>
 
-          <div class="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
+          <div class="scrollbar-hidden z-10 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 lg:sticky lg:top-0">
             <button
               v-for="tab in visibleTabs"
               :key="tab.key"
               type="button"
-              class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition"
+              class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition"
               :class="
                 activeTab === tab.key
                   ? 'bg-white text-violet-700 shadow-sm'
@@ -548,6 +801,7 @@ onBeforeUnmount(() => {
               "
               @click="selectTab(tab.key)"
             >
+              <SummaryTabIcon :name="tab.key" class="text-[14px]" />
               {{ tab.label }}
               <span v-if="tab.key === 'chapters' && summary.chapters.length" class="ml-0.5 text-[10px] text-ink-400">
                 {{ summary.chapters.length }}
@@ -561,7 +815,10 @@ onBeforeUnmount(() => {
           <!-- 总结 -->
           <div v-if="activeTab === 'summary'" class="space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="inline-flex rounded-xl bg-slate-100 p-1">
+              <div
+                class="inline-flex rounded-xl bg-slate-100 p-1"
+                :class="streaming ? 'pointer-events-none opacity-50' : ''"
+              >
                 <button
                   type="button"
                   class="rounded-lg px-3 py-1 text-xs font-medium transition"
@@ -570,6 +827,7 @@ onBeforeUnmount(() => {
                       ? 'bg-white text-violet-700 shadow-sm'
                       : 'text-ink-500 hover:text-ink-700'
                   "
+                  :disabled="streaming"
                   @click="setSummaryView('note')"
                 >
                   笔记
@@ -582,27 +840,44 @@ onBeforeUnmount(() => {
                       ? 'bg-white text-violet-700 shadow-sm'
                       : 'text-ink-500 hover:text-ink-700'
                   "
+                  :disabled="streaming"
                   @click="setSummaryView('cards')"
                 >
                   卡片
                 </button>
               </div>
               <span
-                v-if="summaryView === 'note' && effectiveSummaryView === 'cards'"
+                v-if="summaryView === 'note' && effectiveSummaryView === 'cards' && !streaming"
                 class="text-[11px] text-ink-400"
               >
                 本次总结没有 Markdown 笔记，已显示卡片视图
               </span>
             </div>
 
+            <div
+              v-if="streaming && effectiveSummaryView === 'note' && !streamText"
+              class="max-w-[52rem] rounded-xl border border-violet-100 bg-violet-50/50 px-4 py-4"
+            >
+              <div class="flex items-center gap-2.5">
+                <span class="thinking-dots text-violet-500" aria-hidden="true"><i /><i /><i /></span>
+                <span class="text-xs font-medium text-violet-700">正在整理总结内容…</span>
+              </div>
+              <div class="mt-3 space-y-2">
+                <div class="h-3 w-3/4 animate-pulse rounded bg-violet-100/80" />
+                <div class="h-3 w-2/3 animate-pulse rounded bg-violet-100/60" />
+                <div class="h-3 w-1/2 animate-pulse rounded bg-violet-100/40" />
+              </div>
+            </div>
+
             <MarkdownNote
-              v-if="effectiveSummaryView === 'note'"
-              :markdown="summary.markdown"
-              :seekable="seekable"
+              v-else-if="effectiveSummaryView === 'note'"
+              class="max-w-[52rem]"
+              :markdown="streaming ? streamText : summary.markdown"
+              :seekable="seekable && !streaming"
               @seek="emitSeek"
             />
 
-            <div v-else class="space-y-4">
+            <div v-else class="max-w-[52rem] space-y-4">
               <div class="rounded-xl border border-violet-100 bg-violet-50/70 px-4 py-3">
                 <p class="text-[11px] font-semibold uppercase tracking-wide text-violet-500">TL;DR</p>
                 <p class="mt-1 text-sm font-medium leading-relaxed text-ink-900">

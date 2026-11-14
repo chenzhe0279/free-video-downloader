@@ -43,6 +43,28 @@
   .vip-cta {
     @apply inline-flex items-center justify-center rounded-full border border-transparent px-7 py-3 text-base font-semibold text-white bg-gradient-to-r from-accent-500 via-accent-600 to-accent-600 shadow-[0_8px_16px_-4px_rgba(234,88,12,0.4)] hover:from-accent-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400/40 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition-transform;
   }
+  /* 顶栏“升级 Pro”：品牌蓝胶囊按钮 */
+  .pro-cta {
+    @apply inline-flex items-center justify-center rounded-full border border-transparent bg-brand-500 px-5 py-2 text-sm font-semibold leading-none text-white shadow-[0_6px_16px_-6px_rgba(37,99,235,0.65)] hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 active:scale-95 transition;
+  }
+  /* AI 总结“思考中”动画：三点跳动 + 省略号呼吸 */
+  .thinking-dots {
+    @apply inline-flex items-end gap-[3px];
+  }
+  .thinking-dots i {
+    @apply block h-[5px] w-[5px] rounded-full bg-current;
+    animation: thinking-bounce 1.2s infinite ease-in-out;
+  }
+  .thinking-dots i:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .thinking-dots i:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .thinking-ellipsis {
+    @apply inline-block w-[1.1em] text-left;
+    animation: thinking-fade 1.4s ease-in-out infinite;
+  }
 
   /* ===== Markdown 笔记阅读视图（MarkdownNote.vue） ===== */
   .md-body {
@@ -182,5 +204,36 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* 横向滚动但隐藏滚动条：清晰度 chips、标签栏在窄屏使用 */
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes thinking-bounce {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  35% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes thinking-fade {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
   }
 }

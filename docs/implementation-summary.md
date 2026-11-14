@@ -1,22 +1,23 @@
 # 万能视频下载站 · 功能实现总结
 
-> 版本：v0.6（2026-11-14）
-> 关联文档：[需求分析](./requirements.md) · [v0.6 内容体验设计](./v0.6-content-experience-design.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
+> 版本：v0.8（2026-11-14）
+> 关联文档：[需求分析](./requirements.md) · [v0.8 总结流设计](./v0.8-streaming-summary-design.md) · [v0.7 同屏工作台设计](./v0.7-single-screen-design.md) · [v0.6 内容体验设计](./v0.6-content-experience-design.md) · [AI 总结设计](./ai-summary-design.md) · [AI 问答设计](./ai-qa-design.md) · [项目 README](../README.md)
 
 ---
 
-## 0. 本期新增（v0.6）
+## 0. 本期新增（v0.8）
 
-2026-11-14 本轮在既有下载/预览/去水印/AI 总结/问答能力上新增：
+2026-11-14 本轮把「等待总结」的进度条改成大模型式思考态，总结完成后用 SSE 打字机输出，并把双栏工作台改为等高固定布局，同时更新顶栏会员入口：
 
 | 新增能力 | 说明 | 详见 |
 |---|---|---|
-| Markdown 笔记阅读 | 总结页默认渲染精排版笔记：目录、标题层级、引用、列表、表格、可点击时间戳；保留卡片视图切换 | 第 14 节 · [设计文档](./v0.6-content-experience-design.md) |
-| 思维导图全屏与导出 | 600px 内联、页面内全屏、PNG 2x/3x 与 SVG 导出、展开全部、移动端适配 | 第 14 节 |
-| 字幕文件下载 | 总结完成后下载 SRT/VTT/TXT/Markdown，平台字幕与 ASR 逐字稿均支持 | 第 14 节 |
-| 测试与验收 | 后端 95 个测试；真实 DeepSeek 链路；无头 Chrome 端到端验收 | 第 14 节 |
+| 无进度条思考态 | 生成期间只显示跳动圆点、「正在总结中…」、阶段文案、已用时与取消；不再出现百分比/进度条 | 第 16 节 · [设计文档](./v0.8-streaming-summary-design.md) |
+| SSE 总结流 + 打字机 | 新增 `GET /api/summary/{task_id}/stream`；`state → meta → delta* → done`；完成后打开结果界面并逐块打出 Markdown；断流回退轮询 | 第 16 节 |
+| 等高固定双栏 | ≥1024px 两栏固定为 `100dvh - 5.5rem`、彼此等高、各自内部滚动；页面滚动时整体移动（取消吸顶）；移动端/降级单列 | 第 16 节 |
+| 顶栏「升级 Pro」 | 「开通会员」改为品牌蓝胶囊「升级 Pro」，链接 `#pricing` | 第 16 节 |
+| 测试与验收 | 后端 110 测试；`tsc` + `vite build`；workspace/content/degraded 三个浏览器脚本全绿 | 第 16 节 |
 
-> 既有下载主链路（`probe/preview/download/stream/task_manager`）与 AI 总结/问答核心逻辑未改；增量集中在 `services/summary/{markdown,exporters}.py`、`api/summary.py`、前端 Markdown/导图组件与面板接线。
+> 上一轮（v0.7）交付的同屏双栏、解析即总结见第 15 节。本轮后端新增的是**呈现层 SSE 端点**，总结生成 / 缓存 / 额度 / 任务模型均未改；`SummaryTaskStatus.progress` 保留用于轮询兼容，UI 不再展示。
 
 ---
 
@@ -54,6 +55,11 @@
 | AI 视频总结 | 平台字幕/DeepSeek ASR → 结构化 TL;DR、章节、要点、概念、文稿、Markdown；缓存与额度控制 |
 | AI 视频问答 | 仅基于总结；相关性 gate + 无关拒答；SSE 流式；最近 3 轮多轮对话 |
 | Markmap 思维导图 | 彩色分支、根节点胶囊、曲线连接、缩放/拖拽/折叠 |
+| 同屏工作台 | 解析结果与 AI 总结左右同屏：左栏播放器/信息/清晰度/下载，右栏总结；≥1024px 两栏等高固定、内部滚动，移动端单列 |
+| 解析即总结 | 解析成功自动生成总结（默认开、可关并记忆），缓存复用不占额度，不支持的视频降级为中性提示 |
+| 总结思考态 | 生成期间不展示进度条，显示跳动圆点、「正在总结中…」、阶段文案、已用时与取消 |
+| SSE 总结流 | `GET /api/summary/{id}/stream`；完成后打开结果界面，Markdown 按块下发，前端打字机渲染；断流回退轮询 |
+| 升级 Pro | 顶栏品牌蓝胶囊 CTA，链接会员权益区；套餐按钮保持不变 |
 
 ## 3. 目录与架构
 
@@ -234,6 +240,7 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 | GET | `/api/files/{id}` | 服务端文件下载，支持 Range；`inline=1` 时用于在线播放 |
 | GET | `/api/proxy/{token}` | 代理直链，透传 Range 与 Referer/UA |
 | GET | `/api/health` | 健康检查（ffmpeg、大小上限、TTL） |
+| GET | `/api/summary/{task_id}/stream` | AI 总结 SSE：`state/meta/delta/done/error/cancelled/gone`；思考态与打字机；任务不存在返回 404 |
 
 任务状态：`queued`、`downloading`、`processing`、`cleaning`、`finished`、`error`；`mode` 为 `server`、`local` 或 `preview`。
 
@@ -270,6 +277,9 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 | `VDS_PREVIEW_RATE_LIMIT_PER_MINUTE` | `120` | 在线预览限流（含 Range 请求） |
 | `VDS_PROBE_CACHE_TTL_SECONDS` | `1200` | 解析缓存 |
 | `VDS_DIRECT_LINK_TTL_SECONDS` | `1800` | 直链/代理 token 有效期 |
+| `VDS_SUMMARY_STREAM_POLL_SECONDS` | `0.8` | 总结未完成时的状态轮询间隔 |
+| `VDS_SUMMARY_STREAM_CHUNK_CHARS` | `48` | SSE `delta` 分块字符数（16–400） |
+| `VDS_SUMMARY_STREAM_INTERVAL_MS` | `35` | SSE `delta` 间隔毫秒（0–200，0 为瞬时） |
 
 ## 7. 安全与清理
 
@@ -498,3 +508,148 @@ runtime/                 # 运行时下载、验证产物（gitignore，不放�
 - 导图导出当前展开内容；折叠后需先“展开全部”。
 - 导图单边超过 16384px 自动降低倍率。
 - 问答回答仍未渲染 Markdown。
+
+---
+
+## 15. 同屏工作台与解析即总结（v0.7）
+
+> 详细方案、决策确认与实施记录见 [v0.7 同屏工作台设计](./v0.7-single-screen-design.md)。本轮后端业务代码与接口契约**零改动**。
+
+### 15.1 布局
+
+- 结果区从一个 `max-w-3xl` 窄列改为 `#workspace`（`max-w-[1400px]`）+ CSS Grid：`lg:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]`，≥1024px 双栏，<1024px 单列（视频信息在上、总结在下）。
+- 左栏 v0.7 交付时使用 `lg:sticky lg:top-20` + `lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto`；**v0.8 已改为两栏等高固定工作台**（`lg:h-[calc(100dvh-5.5rem)]`，取消吸顶，两栏各自内部滚动），详见第 16 节。
+- `TaskProgress` 从结果区下方移入左栏，下载进度与视频信息同列。
+- 解析成功后 `scrollIntoView` 工作台（`scroll-mt-20`，尊重 `prefers-reduced-motion`）；下载/预览的动作提示从 Hero 移到工作台顶部，避免滚动后被忽略。
+- AI 未启用（`/api/summary/config` 返回 `enabled=false`）时自动降级为单列，右侧不再留空白。
+
+### 15.2 左栏紧凑化（`ResultPanel.vue`）
+
+- 清晰度由纵向列表（每行含主/次按钮，约 300px）改为换行 chips + 一行选中项详情 + 一组动作按钮；
+- 详情行展示格式、大小、是否支持直链、音频是否可预览，`note` 单行截断；
+- 主按钮「下载到本地」+ `.chip` 次级按钮「直链下载」「服务端转存」（直链在开启去水印时隐藏，沿用原逻辑）；
+- 大段说明折叠进「预览与下载说明」；去水印改为工具条 chip 开关，开启后才显示说明行；
+- 左栏高度从约 720px 降到约 550–620px，1440×900 可完整容纳；props/emits/`defineExpose({ seekTo })`/`id="result"` 全部保持不变。
+
+### 15.3 解析即总结（`AiSummaryPanel.vue` + `Home.vue`）
+
+- 新增 props `autoStart`，emits `update:autoSummary`、`task-change`；`Home` 持有 `autoSummary`（`localStorage['vds-auto-summary']`，默认开启）与 `summaryTaskId`。
+- 触发链：`probe` 成功 → 面板挂载 → `loadConfig()` → `maybeAutoGenerate()`（`autoStarted` 守卫，只执行一次）。
+- 前端前置拦截：合集/播放列表、时长超过 `max_duration_seconds` 时不发请求，直接展示原因。
+- 结果分支：缓存命中（`cached=true`）直接渲染且不占额度；新建任务进入现有进度态；429/422/503/网络错误归类为“可预期软失败”，用琥珀色中性提示 + 「立即生成」，真实失败（ASR/LLM 报错）仍走红色错误卡。
+- 关闭开关只影响下一次解析，不取消已在进行任务；用户取消后不自动重启。
+- 竞态：`analyze()` 在 `probe` 之前 `await deleteSummary(上一任务 id)`，释放单 IP 并发槽位（默认 1），避免连续解析两个视频时新视频自动总结偶发 429。
+- 生成过程中常驻额度说明；面板头部新增「解析后自动总结」开关；标签栏在桌面吸顶（需根节点去掉 `overflow-hidden`）；笔记/卡片内容限宽 `max-w-[52rem]`。
+
+### 15.4 验证记录
+
+- 后端：`unittest discover -s tests` → **95 个测试通过**（无后端改动，纯回归）。
+- 前端：`npx tsc --noEmit` 通过；`npm run build` 通过，`index-oJDAjX2S.js 409.86 KB / gzip 150.47 KB`、`index-eHL4zoES.css 50.89 KB / gzip 8.50 KB`。
+- 真实链路（`backend/tests/workspace_e2e.py`，B站 `BV1s18cziEtw`，缓存为空）：
+  - 解析 4.8 秒；**未点击任何按钮**即出现「准备总结 3%」与额度说明，16.7 秒后渲染 Markdown 笔记；
+  - 1440×900：左栏 `36→452`、右栏 `476→1388`，两栏 `top` 同为 80；左栏底 697px、右栏顶 80px，同屏可见；无横向溢出；
+  - 滚动 700px 后左栏 `top` 仍为 80（吸顶生效），右栏继续滚动；
+  - 1280×800：左 416px / 右 777px，仍双栏；
+  - 点击笔记 `01:00` → 预览准备完成后 `video.currentTime=60`；
+  - 关闭自动总结：`localStorage` 写入 `off`，重新解析 5 秒后仍只有「生成总结」，无进度、无笔记；
+  - 重新手动生成命中缓存，立即出笔记、不占额度；
+  - 375×812：单列（右栏 `top=707` > 左栏 `bottom=687`），`scrollWidth=375` 无横向溢出；
+  - 控制台 `Runtime.exceptionThrown` 0 次，总耗时 48.1 秒，消耗 1 次当日额度。
+- 降级链路：`VDS_SUMMARY_ENABLED=false` 重启后端后，工作台回落为单列（`max-w-3xl`、取消吸顶）、右栏显示“AI 总结未启用”、无自动总结开关、无溢出、无异常。
+- 产物：`runtime/proof/v0.7-workspace-{1440,1280,375}.png`、`v0.7-workspace-sticky.png`、`v0.7-auto-summary-{generating,off}.png`、`v0.7-degraded-single-column.png`、`v0.7-e2e.json`。
+- 回归脚本适配：`browser_e2e.py`、`content_e2e.py` 的清晰度选择由 `#result li` 改为 `#result [role=radio]`。
+
+### 15.5 相关文件
+
+- [首页布局](../frontend/src/views/Home.vue)
+- [结果面板](../frontend/src/components/ResultPanel.vue)
+- [AI 总结面板](../frontend/src/components/AiSummaryPanel.vue)
+- [样式工具类](../frontend/src/style.css)
+- [v0.7 E2E](../backend/tests/workspace_e2e.py)
+- [降级布局核对](../backend/tests/degraded_e2e.py)
+- [v0.7 设计文档](./v0.7-single-screen-design.md)
+- [v0.8 总结流与等高工作台设计](./v0.8-streaming-summary-design.md)
+
+### 15.6 已知限制
+
+- 自动总结默认每次解析消耗 1 次额度（默认 3 次/天）；自测期建议调高 `VDS_SUMMARY_DAILY_LIMIT_PER_IP` 或复用已缓存视频。
+- 自动总结与在线预览并行执行，首次播放高清格式仍需等待服务端合并。
+- 关闭开关不取消进行中的任务；取消后不会自动重启。
+- 笔记目录（TOC）内部滚动条仍为浏览器原生样式（v0.6 既有实现）。
+- **v0.8 更新**：生成进度条已移除，改为思考态 + SSE 打字机；左栏吸顶改为两栏等高固定，详见第 16 节。
+
+---
+
+## 16. 无进度条总结流与等高工作台（v0.8）
+
+> 详细方案、SSE 契约、决策与实施记录见 [v0.8 总结流设计](./v0.8-streaming-summary-design.md)。本轮总结生成/缓存/额度/任务模型未改，新增的是呈现层 SSE 端点。
+
+### 16.1 后端 SSE
+
+- 新增 `GET /api/summary/{task_id}/stream`（`text/event-stream`，任务不存在 404，响应头 `Cache-Control: no-cache, no-transform`、`X-Accel-Buffering: no`）。
+- [stream.py](../backend/app/services/summary/stream.py)：未完成时只推 `state {status, stage, message}`（不含 progress）；完成后先推 `meta`（完整任务状态），再按块推 `delta {text}`，最后 `done`；`error/cancelled/gone` 为终态；空闲 12 秒发 `: keep-alive`。
+- 分块：`iter_markdown_chunks()` 优先整行切分、超长行硬切，保证拼接结果与 `summary.markdown` 完全一致；Markdown 为空时只发 `meta → done`。
+- [settings.py](../backend/app/services/summary/settings.py)：新增 `summary_stream_poll_seconds=0.8`、`summary_stream_chunk_chars=48`、`summary_stream_interval_ms=35`（带 clamp）；`backend/.env.example` 已同步。
+- 测试：[test_summary_stream.py](../backend/tests/test_summary_stream.py) 13 → 15 个，覆盖事件顺序、分块、断连、错误/取消/过期、state 不含 progress、空 Markdown 与响应头。
+
+### 16.2 前端思考态与打字机
+
+- [AiSummaryPanel.vue](../frontend/src/components/AiSummaryPanel.vue)：
+  - 移除进度条/百分比，生成期显示 `.thinking-dots` 跳动圆点、「正在总结中…」、阶段文案、已用时与取消；
+  - 新增 `summaryPhase`（`idle/starting/thinking/streaming/done/error/cancelled`）并绑定根节点 `data-summary-phase`，滚动容器加 `data-summary-scroll`；
+  - `meta` 到达即打开结果界面并 `stopElapsed()`；`delta` 追加到 `streamText` 交给 `MarkdownNote` 增量渲染；
+  - 打字期间「笔记/卡片」可见但禁用、复制/下载/重新生成隐藏、时间戳不可 seek；结束后恢复；
+  - 首块到达前显示「正在整理总结内容…」骨架，避免闪出空笔记提示；
+  - 流请求失败或「无终态 EOF」时自动回退 `GET /api/summary/{id}` 轮询，避免永久停在思考态/「正在输出」；
+  - 思考卡与「正在输出」徽章带 `role="status" aria-live="polite"`。
+- [client.ts](../frontend/src/api/client.ts)：`streamSummaryTask()` 支持 fetch 流读取、`\r\n`、`: keep-alive` 忽略与 7 种事件分发；既有轮询接口保留。
+- 实测：思考态 `hasProgressbar=false`、`hasPercent=false`；打字机采样 `[35, 86, 134]`（连续递增）；完成态正文 758 字符、复制/切视图恢复。
+
+### 16.3 等高固定工作台与 Pro
+
+- [Home.vue](../frontend/src/views/Home.vue)：`#workspace` 双栏 grid 使用 `lg:h-[calc(100dvh-5.5rem)]`（`100vh` 降级）与 `lg:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]`；左栏 `lg:flex lg:h-full lg:flex-col lg:overflow-y-auto`；右栏 `AiSummaryPanel` 头部固定、正文内部滚动；取消 v0.7 的吸顶。
+- [ResultPanel.vue](../frontend/src/components/ResultPanel.vue)：`lg:h-full lg:flex-1`，控件区内部滚动；「预览与下载说明」`lg:mt-auto` 贴底。
+- 实测 1440×900：左 `416×812`、右 `912×812`、`top=80`、`gridHeight=812`；1280×800：左 `416×712`、右 `777×712`；页面下滚 300px 后两栏 `top=-220` 同步移动；375×812 单列（右栏 `top=711` > 左栏 `bottom=691`）、`docWidth=375`。
+- [AppHeader.vue](../frontend/src/components/AppHeader.vue) + [style.css](../frontend/src/style.css)：`开通会员` → `升级 Pro`，`.pro-cta` 品牌蓝胶囊；实测 `rgb(59,107,250)`、白字、`9999px`、高 32px、`href=#pricing`。
+
+### 16.4 验证记录
+
+- 后端：`unittest discover -s tests` → **110 个测试通过**。
+- 前端：`npx tsc --noEmit` 通过；`npm run build` 通过。流式验收时产物为 `index-BWSb4oyz.js 414.26 KB / gzip 151.96 KB`、`index-BqEhZONv.css 53.88 KB / gzip 8.93 KB`；UI 精修后最终产物为 `index-B-R94qI4.js 414.51 KB / gzip 152.06 KB`、`index-BhlyPCgw.css 53.96 KB / gzip 8.94 KB`。
+- 浏览器 E2E（Mock DeepSeek + 真实 B 站样本 `BV1s18cziEtw`；放慢打字节奏用于断言）：
+  - 解析 → 思考态（无进度条/百分比，阶段「正在解析视频信息…」）→ meta → 打字机 `[35,86,134]` → done；
+  - 1440×900 两栏 `top` 同为 80、高度同为 812；右栏内滚 `scrollTop=160` 时左栏 `top` 仍为 80；
+  - 1280×800 两栏高度 712；375×812 单列、无横向溢出；
+  - Pro CTA 计算样式与链接断言通过；自动总结开关 `off/on` 持久化通过；
+  - 控制台 `Runtime.exceptionThrown` 0 次；整轮 24.5 秒。命中缓存路径另一轮 23.3 秒：initial phase 直接 streaming，脚本自动点「重新生成」后验证思考态与打字机，同样 PASS。
+- 回归：
+  - `python -m tests.content_e2e`：笔记 11 标题、10 列表、2 引用、8 时间戳；时间戳跳转 `currentTime=60`；导图 2x/3x/SVG 与 SRT/MD 字幕正常；0 异常。
+  - `VDS_SUMMARY_ENABLED=false` + `python -m tests.degraded_e2e`：单列（左底 807、右顶 827）、无自动开关、无固定高度、无溢出、0 异常。
+- 补充修复：B 站 PCDN 偶发 `WinError 10061`（`mcdn.bilivideo.cn:8082` 节点拒绝连接）；`source.download_audio` 增加「重新解析 + `worstaudio/best` 降码率」二次尝试，用户反馈视频 `BV11XWR6ZEBu` 实测下载成功（4.39MB）。
+- 后续 UI 微调（同日）：移除 AI 总结标题旁的 DeepSeek 徽章；压缩 Hero 间距（1440×900 下 623 → 463px）并把平台 chips 收敛为单行；为 5 个 tab 增加 emoji 图标（📝 / 📑 / 📄 / 🧠 / 💬，详见 [v0.8 设计文档 §11.4](./v0.8-streaming-summary-design.md#114-2026-11-14-后续-ui-微调)）。
+- 产物：`runtime/proof/v0.8-thinking.png`、`v0.8-streaming.png`、`v0.8-workspace-{1440,1280,375}.png`、`v0.8-degraded-single-column.png`、`v0.8-e2e.json`；回归产物 `v0.6-*.png` / `v0.6-e2e.json`。
+
+### 16.5 相关文件
+
+- [总结 SSE 路由](../backend/app/api/summary.py)
+- [总结流实现](../backend/app/services/summary/stream.py)
+- [音频下载与 PCDN 重试](../backend/app/services/summary/source.py)
+- [总结配置](../backend/app/services/summary/settings.py)
+- [前端 API 客户端](../frontend/src/api/client.ts)
+- [AI 总结面板](../frontend/src/components/AiSummaryPanel.vue)
+- [Tab 图标](../frontend/src/components/SummaryTabIcon.vue)
+- [首页布局](../frontend/src/views/Home.vue)
+- [结果面板](../frontend/src/components/ResultPanel.vue)
+- [顶栏](../frontend/src/components/AppHeader.vue)
+- [样式](../frontend/src/style.css)
+- [v0.8 浏览器验收](../backend/tests/workspace_e2e.py)
+- [v0.6 内容回归](../backend/tests/content_e2e.py)
+- [降级验收](../backend/tests/degraded_e2e.py)
+- [v0.8 设计文档](./v0.8-streaming-summary-design.md)
+
+### 16.6 已知限制
+
+- 打字机是呈现层流式：模型仍一次返回完整 JSON，等待时间不变；打字时长随 Markdown 长度线性增长，可用 `VDS_SUMMARY_STREAM_INTERVAL_MS` 调整或设 0 关闭。
+- SSE 需要反代关闭缓冲；流不可用时回退轮询，用户仍可看到完整结果。
+- 浏览器验收在 Chrome 完成；Safari/Firefox 的 SSE、`dvh` 未单独验证。
+- 本轮真实 DeepSeek 链路未重复消耗额度，UI/流验收使用 Mock；v0.7 已验证真实 ASR/总结链路。
