@@ -11,7 +11,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
+
 from app.config import get_settings
+from app.membership.usage import reserve_summary
 from app.services import media
 from app.services.media import MediaError
 from app.services.summary import asr, source, subtitles, summarizer
@@ -236,6 +239,7 @@ class SummaryTaskManager:
         client_ip: str,
         *,
         force: bool = False,
+        member_user_id: str | None = None,
     ) -> tuple[SummaryTask, bool]:
         settings = self._settings()
         if not settings.enabled:
@@ -277,7 +281,13 @@ class SummaryTaskManager:
                     f"同时进行的 AI 总结任务已达上限"
                     f"（{settings.summary_max_concurrent_per_ip} 个），请稍后再试"
                 )
-            self._check_daily(client_ip, settings)
+            reserved = None
+            if member_user_id:
+                reserved = await run_in_threadpool(reserve_summary, member_user_id)
+                if reserved is False:
+                    raise SummaryQuotaError("今日会员 AI 总结次数已达上限（20 次），北京时间零点重置")
+            if reserved is None:
+                self._check_daily(client_ip, settings)
 
             task = SummaryTask(
                 id=uuid.uuid4().hex[:16],
@@ -294,7 +304,8 @@ class SummaryTaskManager:
             )
             self._tasks[task.id] = task
             self._per_ip[client_ip] = self._active_for_ip(client_ip) + 1
-            self._increment_daily(client_ip)
+            if reserved is None:
+                self._increment_daily(client_ip)
             task.runner = asyncio.create_task(
                 self._run(task, normalized),
                 name=f"vds-summary-{task.id}",

@@ -58,7 +58,7 @@ const bodyEnd = html.indexOf('</body>', appStart)
 const appClose = bodyEnd === -1 ? -1 : html.lastIndexOf('</div>', bodyEnd)
 const appHtml = appStart === -1 || appClose === -1 ? '' : html.slice(appStart + '<div id="app">'.length, appClose)
 check('已注入预渲染正文', appHtml.length > 4000, `长度 ${appHtml.length}`)
-check('预渲染包含核心卖点文案', appHtml.includes('粘贴链接，') && appHtml.includes('3 秒拿到原片'))
+check('预渲染包含核心卖点文案', appHtml.includes('下载视频，') && appHtml.includes('留住要点。'))
 check('预渲染包含支持平台文案', appHtml.includes('支持上千个平台'))
 check('预渲染 H1 含品牌关键词', appHtml.includes('ClipNest 万能视频下载总结器'))
 check('预渲染 FAQ 可见', appHtml.includes('为什么有些视频解析失败？'))
@@ -97,7 +97,7 @@ check('llms-full.txt 含对比表与运营数据', llmsFull.includes('四种下�
 const pricingPath = resolve(dist, 'pricing.md')
 check('pricing.md 存在', existsSync(pricingPath))
 const pricing = existsSync(pricingPath) ? readFileSync(pricingPath, 'utf8') : ''
-check('pricing.md 含免费与规划档位', pricing.includes('¥0') && pricing.includes('¥19') && pricing.includes('尚未开放'))
+check('pricing.md 含免费、付费档位及会员额度', ['¥0', '¥19', '¥149', '20 次', '一次性'].every(s => pricing.includes(s)))
 check('GEO 文件无占位域名残留', siteUrl === PLACEHOLDER_SITE || !(llms + llmsFull + pricing).includes(PLACEHOLDER_SITE))
 
 if (failures.length) {

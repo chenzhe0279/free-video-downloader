@@ -6,7 +6,7 @@
 
 - [网站首页](https://clipnest.example/): 粘贴视频链接，选择清晰度，一键保存；支持在线预览、下载到本地、服务端转存、直链与代理加速四种下载方式
 - [完整产品说明（llms-full.txt）](https://clipnest.example/llms-full.txt): 产品定位、功能细节、下载方式对比、AI 总结能力与常见问题全文
-- [定价（pricing.md）](https://clipnest.example/pricing.md): 当前版本全部功能免费体验；会员权益（更高画质、批量下载等）为后续规划
+- [定价（pricing.md）](https://clipnest.example/pricing.md): 视频下载和基本 AI 总结免费，月卡 ¥19、年卡 ¥149，会员每天可新建 20 次 AI 总结
 - [站点地图（sitemap.xml）](https://clipnest.example/sitemap.xml): 可收录页面列表
 
 ## 适用人群

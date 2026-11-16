@@ -158,7 +158,7 @@ const faqs = [
   },
   {
     q: '收费吗？',
-    a: '当前版本全部功能免费体验；会员权益（更高画质、批量下载、优先通道等）为后续规划，付费能力将在后续版本开放。',
+    a: '视频下载和基本 AI 总结可免费使用。月卡 ¥19（30 天），年卡 ¥149（365 天），会员每天可新建 20 次 AI 视频总结。一次性付款，到期后可自行续买。',
   },
 ]
 
@@ -544,99 +544,77 @@ onBeforeUnmount(() => {
 <template>
   <div id="top">
     <!-- Hero -->
-    <section class="relative overflow-hidden pb-6 pt-6 sm:pt-8">
-      <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute left-1/2 top-[-14rem] h-[28rem] w-[42rem] -translate-x-1/2 rounded-full bg-brand-200/40 blur-[120px]" />
-        <div class="absolute right-[-8rem] top-24 h-72 w-72 rounded-full bg-violet-200/40 blur-[100px]" />
-      </div>
+    <section class="studio-hero" aria-labelledby="studio-title">
+      <div class="studio-hero__inner">
+        <div class="studio-hero__intro">
+          <h1 id="studio-title" class="studio-hero__title">
+            <span class="sr-only">ClipNest 万能视频下载总结器 · </span>下载视频，<br /> <span>留住要点。</span>
+          </h1>
+          <p class="studio-hero__description">
+            粘贴视频链接，预览并下载原片，也可以用 AI 提取摘要、章节和字幕。
+          </p>
 
-      <div class="mx-auto max-w-3xl px-4 text-center sm:px-6">
-        <span class="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-white/80 px-3.5 py-1.5 text-xs font-medium text-brand-700 shadow-soft">
-          <span class="relative flex h-2 w-2">
-            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-          支持上千个平台 · 解析服务运行中
-        </span>
-
-        <h1 class="mt-4 text-[34px] font-black leading-[1.15] tracking-tight text-ink-900 text-balance sm:text-5xl">
-          <span class="sr-only">ClipNest 万能视频下载总结器 · </span>粘贴链接，<span class="text-gradient">3 秒拿到原片</span>
-        </h1>
-        <p class="mx-auto mt-3 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
-          YouTube、Bilibili、抖音、TikTok 等站点一键解析。音视频自动合并后直接下载到本机，也支持服务端暂存，手机电脑都能用。
-        </p>
-
-        <!-- Search -->
-        <form id="download" class="mt-5" @submit.prevent="analyze">
-          <div class="card flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:rounded-full">
-            <label class="flex flex-1 items-center gap-3 px-3">
-              <svg class="h-5 w-5 shrink-0 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+          <form id="download" class="studio-form" @submit.prevent="analyze">
+            <label class="sr-only" for="studio-url">粘贴视频链接</label>
+            <div class="studio-form__row">
+              <svg aria-hidden="true" class="studio-form__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 13a4 4 0 0 0 5.66 0l3.54-3.54a4 4 0 0 0-5.66-5.66l-2.03 2.03m2.49 5.17a4 4 0 0 0-5.66 0L4.8 14.54a4 4 0 0 0 5.66 5.66l2.03-2.03" />
               </svg>
               <input
+                id="studio-url"
                 v-model="url"
                 type="text"
                 inputmode="url"
                 autocomplete="off"
                 aria-label="粘贴视频链接"
-                placeholder="粘贴视频链接，例如 https://www.bilibili.com/video/..."
-                class="w-full bg-transparent py-3 text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none"
+                placeholder="粘贴视频链接"
               />
-            </label>
-            <button type="submit" class="btn-primary rounded-full sm:w-auto" :disabled="loading">
-              <svg v-if="loading" class="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
-              </svg>
-              {{ loading ? '解析中…' : '开始解析' }}
-            </button>
-          </div>
-        </form>
+              <button type="submit" class="studio-action" :disabled="loading">
+                {{ loading ? '解析中…' : '开始解析' }}
+                <svg v-if="!loading" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+          </form>
 
-        <div class="mt-2 min-h-[18px]">
-          <p v-if="errorMsg && !result" class="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
-            {{ errorMsg }}
-          </p>
-          <p v-else-if="noticeMsg && !result" class="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">
-            {{ noticeMsg }}
-          </p>
+          <p v-if="errorMsg && !result" class="studio-message studio-message--error" role="alert">{{ errorMsg }}</p>
+          <p v-else-if="noticeMsg && !result" class="studio-message" role="status">{{ noticeMsg }}</p>
+
+          <div class="studio-platforms">
+            <a href="#platforms">支持上千个平台 <span aria-hidden="true">↗</span></a>
+            <ul aria-label="部分支持的平台">
+              <li v-for="name in platforms.slice(0, 4)" :key="name">{{ name }}</li>
+            </ul>
+          </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-          <span
-            v-for="name in platforms"
-            :key="name"
-            class="chip cursor-default px-2.5 py-1 text-[11px]"
-          >
-            {{ name }}
-          </span>
-          <span class="chip cursor-default px-2.5 py-1 text-[11px] text-ink-400">+1800 更多</span>
-        </div>
-
-        <dl class="mx-auto mt-5 grid max-w-lg grid-cols-3 divide-x divide-slate-200 rounded-2xl border border-slate-200/70 bg-white/70 py-2.5 text-center shadow-soft">
-          <div>
-            <dt class="text-[11px] text-ink-400">已解析</dt>
-            <dd class="mt-0.5 text-base font-bold text-ink-900">128,436</dd>
+        <figure class="studio-preview">
+          <figcaption class="studio-preview__caption">
+            <span class="studio-preview__marker" aria-hidden="true"></span>
+            示例视频
+          </figcaption>
+          <div class="studio-preview__poster">
+            <img src="/clipnest-preview.webp" alt="日出时徒步者站在群山之上" width="1000" height="562" fetchpriority="high" />
           </div>
-          <div>
-            <dt class="text-[11px] text-ink-400">平均耗时</dt>
-            <dd class="mt-0.5 text-base font-bold text-ink-900">6.2s</dd>
+          <div class="studio-preview__footer">
+            <div>
+              <span class="studio-preview__title">群山日出</span>
+              <ul class="studio-preview__details" aria-label="示例输出">
+                <li>原片下载</li><li>AI 总结</li><li>字幕导出</li>
+              </ul>
+            </div>
+            <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4" />
+            </svg>
           </div>
-          <div>
-            <dt class="text-[11px] text-ink-400">直链成功率</dt>
-            <dd class="mt-0.5 text-base font-bold text-ink-900">92%</dd>
-          </div>
-        </dl>
-        <p class="mx-auto mt-2 max-w-lg text-center text-[11px] leading-relaxed text-ink-400">
-          站内统计口径：累计解析请求数 · 解析请求平均耗时 · 解析结果中直链可用比例；数据截至 2026-11-14
-        </p>
+        </figure>
       </div>
     </section>
 
     <!-- GEO：产品定义块（供 AI 直接摘取） -->
     <section id="what-is" class="mx-auto max-w-6xl px-4 pt-14 sm:px-6">
       <div class="mx-auto max-w-2xl text-center">
-        <p class="text-sm font-semibold uppercase tracking-wider text-brand-700">产品介绍</p>
         <h2 class="mt-2 text-3xl font-bold tracking-tight text-ink-900 text-balance">什么是万能视频下载总结器？</h2>
       </div>
       <div class="mx-auto mt-8 max-w-3xl space-y-4">
@@ -871,7 +849,7 @@ onBeforeUnmount(() => {
             </tr>
             <tr>
               <td class="px-4 py-3 font-semibold text-ink-900">费用</td>
-              <td class="px-4 py-3 font-semibold text-brand-700">当前免费</td>
+              <td class="px-4 py-3 font-semibold text-brand-700">基础功能免费</td>
               <td class="px-4 py-3">免费/付费</td>
               <td class="px-4 py-3">多为付费</td>
             </tr>

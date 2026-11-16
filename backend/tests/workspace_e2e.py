@@ -340,19 +340,18 @@ async def run() -> int:
                     fail("layout-1280", "出现横向溢出")
             await shot(cdp, "v0.8-workspace-1280.png")
 
-            # 8. 顶栏「升级 Pro」样式
+            # 8. 顶栏「升级 Pro」入口
             await cdp.send(
                 "Emulation.setDeviceMetricsOverride",
                 {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False},
             )
             await asyncio.sleep(0.6)
             cta = await cdp.eval(
-                "(() => { const link = [...document.querySelectorAll('header a')]"
-                "   .find((a) => a.textContent.trim() === '升级 Pro');"
-                " if (!link) return null; const style = getComputedStyle(link);"
-                " return { text: link.textContent.trim(), href: link.getAttribute('href'),"
-                "   bg: style.backgroundColor, color: style.color,"
-                "   radius: style.borderRadius, height: Math.round(link.getBoundingClientRect().height) }; })()"
+                "(() => { const link = [...document.querySelectorAll('header a[aria-label]')]"
+                "   .find((a) => a.getAttribute('aria-label').startsWith('升级 Pro'));"
+                " if (!link) return null;"
+                " return { href: link.getAttribute('href'),"
+                "   height: Math.round(link.getBoundingClientRect().height) }; })()"
             )
             step("pro-cta", style=cta)
             if not cta:
@@ -360,10 +359,8 @@ async def run() -> int:
             else:
                 if cta["href"] != "#pricing":
                     fail("pro-cta", f"href 不是 #pricing：{cta['href']}")
-                if cta["bg"] not in {"rgb(59, 107, 250)", "rgb(37, 99, 235)"}:
-                    fail("pro-cta", f"按钮不是品牌蓝：{cta['bg']}")
-                if cta["radius"] not in {"9999px", "9999px 9999px 9999px 9999px"}:
-                    fail("pro-cta", f"按钮不是胶囊圆角：{cta['radius']}")
+                if cta["height"] < 40:
+                    fail("pro-cta", f"按钮点击区域过小：{cta['height']}px")
 
             # 9. 自动总结开关偏好仍可持久化
             await cdp.eval(

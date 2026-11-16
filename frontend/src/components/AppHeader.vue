@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import BrandMark from './BrandMark.vue'
+import { useMembership } from '../membership'
+
+const { account, show } = useMembership()
 
 const navs = [
   { label: '首页', href: '#top' },
@@ -10,13 +13,13 @@ const navs = [
 </script>
 
 <template>
-  <header class="sticky top-0 z-40 glass">
+  <header class="studio-header sticky top-0 z-40">
     <div class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
       <a href="#top" class="flex items-center gap-2.5">
-        <span class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-500 shadow-lift">
-          <BrandMark class="h-7 w-7 text-white" />
+        <span class="studio-header__mark">
+          <BrandMark class="h-6 w-6" />
         </span>
-        <span class="text-[15px] font-bold tracking-tight text-ink-900">ClipNest</span>
+        <span class="studio-header__name">ClipNest</span>
       </a>
 
       <nav class="hidden items-center gap-1 md:flex">
@@ -24,7 +27,7 @@ const navs = [
           v-for="item in navs"
           :key="item.href"
           :href="item.href"
-          class="rounded-full px-3.5 py-2 text-sm font-medium text-ink-600 transition hover:bg-white hover:text-brand-600"
+          class="studio-header__link"
         >
           {{ item.label }}
         </a>
@@ -32,12 +35,14 @@ const navs = [
 
       <div class="flex items-center gap-2">
         <button
+          v-if="account.enabled"
           type="button"
-          class="hidden text-sm font-medium text-ink-600 transition hover:text-brand-600 sm:block"
+          class="studio-header__link"
+          @click="show(account.user ? 'account' : 'login')"
         >
-          登录
+          {{ account.user ? '我的会员' : '登录' }}
         </button>
-        <a href="#pricing" class="pro-cta" aria-label="升级 Pro，查看会员权益">升级 Pro</a>
+        <a href="#pricing" class="studio-header__pro" aria-label="升级 Pro，查看会员权益">升级 Pro <span aria-hidden="true">↗</span></a>
       </div>
     </div>
   </header>

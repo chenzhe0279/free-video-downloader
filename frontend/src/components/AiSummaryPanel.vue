@@ -12,11 +12,14 @@ import {
   type SummaryTranscriptSegment,
 } from '../api/client'
 import { formatDuration } from '../utils/format'
+import { useMembership } from '../membership'
 import { safeFilename, saveBlob } from '../utils/download'
 import MarkdownNote from './MarkdownNote.vue'
 import MindmapViewer from './MindmapViewer.vue'
 import QaChatPanel from './QaChatPanel.vue'
 import SummaryTabIcon from './SummaryTabIcon.vue'
+
+const { account: membershipAccount, refresh: refreshMembership } = useMembership()
 
 const props = defineProps<{
   result: ProbeResult
@@ -450,6 +453,7 @@ async function generate(force = false, options: { automatic?: boolean } = {}) {
   try {
     const created = await api.createSummary(props.result.url, force)
     taskId = created.task_id
+    if (membershipAccount.value.membership) void refreshMembership().catch(() => {})
   } catch (err) {
     stopTimers()
     starting.value = false
@@ -728,7 +732,11 @@ onBeforeUnmount(() => {
           </p>
           <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
             <span class="text-[11px] leading-relaxed text-ink-400">
-              本次生成会占用每 IP 每日额度（默认 {{ config.daily_limit_per_ip }} 次/天）；命中缓存不占用额度。
+              <template v-if="membershipAccount.membership">
+                今日会员额度剩余 {{ membershipAccount.quota?.remaining }} 次，北京时间零点重置。
+              </template>
+              <template v-else>新建总结占用每 IP 每日额度（默认 {{ config.daily_limit_per_ip }} 次/天）。</template>
+              命中缓存不扣额度。
             </span>
             <button type="button" class="text-xs font-medium text-red-500 hover:text-red-600" @click="cancel">
               取消

@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-backend/.env
 backend/runtime/
 *.log
 
@@ -31,6 +30,7 @@ runtime/
 *.webm
 *.part
 
-# Local env
+# Local environment files contain credentials. Commit only .env.example.
 .env
 .env.local
+/backend/.env

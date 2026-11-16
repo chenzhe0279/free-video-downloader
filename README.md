@@ -20,11 +20,14 @@
 | 解析即总结 | 解析成功自动生成总结（默认开启、可关闭并记忆），缓存复用不占额度，不支持的视频降级为提示 |
 | 总结思考态 | 生成期间不展示进度条：跳动圆点 +「正在总结中…」+ 阶段文案 + 已用时 + 取消 |
 | SSE 打字机 | 总结完成后直接打开结果界面，Markdown 按块流出；流不可用时回退轮询 |
-| 升级 Pro | 顶栏品牌蓝胶囊入口，链接会员权益区 |
+| 升级 Pro | 月卡和年卡通过 Stripe 一次性付款，会员账号每天可新建 20 次 AI 总结 |
 
 > 2026-11-14 本轮新增：无进度条总结流（思考态 + SSE 打字机）、左右栏等高固定工作台、顶栏「升级 Pro」。
 
 ## 文档索引
+
+- [会员购买、Stripe 设置和 Windows 离线验收](docs/stripe-membership.md)
+- [本次交付记录：会员、Stripe 与首页改版](docs/implementation-summary.md#最新交付2026-11-17)
 
 - [需求分析](docs/requirements.md)
 - [实现总结](docs/implementation-summary.md)
@@ -68,7 +71,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 - 首次运行会创建 `backend/.venv` 并安装依赖；不要再用 pip 安装。
-- `uv.lock` 是按当前机器网络用清华镜像生成的；换网络后可执行 `uv lock --default-index https://pypi.org/simple` 重新生成。
+- `uv.lock` 使用 PyPI。联网安装一次后，可用 `uv sync --offline --locked` 检查本地缓存。
 - 开发时也可以直接 `uv run python -c "import app.main"` 检查导入。
 - 依赖更新：修改 `pyproject.toml` 后执行 `uv lock` 和 `uv sync`。
 
@@ -239,7 +242,7 @@ cd backend
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出与转义、字幕文件导出（SRT/VTT/TXT/MD 与 404/409/422）、任务缓存/额度/取消、API 错误映射、总结 SSE 事件/分块/断连/空 Markdown，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制；当前共 **110 个后端测试**。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py`、`tests/qa_browser_e2e.py`、`tests/content_e2e.py`、`tests/workspace_e2e.py` 与 `tests/degraded_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。总结流与等高工作台验收：
+AI 测试覆盖字幕解析、ASR 合并、JSON 归一化、Markdown 导出与转义、字幕文件导出（SRT/VTT/TXT/MD 与 404/409/422）、任务缓存/额度/取消、API 错误映射、总结 SSE 事件/分块/断连/空 Markdown，以及问答材料构建、相关性 gate、SSE 流式解析、无关拒答和额度限制。`backend/tests/mock_deepseek.py` 可用于无 Key 的 Mock 全链路验证（`uvicorn tests.mock_deepseek:app --port 8100`，并通过 `VDS_DEEPSEEK_BASE_URL` 指向它）；`tests/browser_e2e.py`、`tests/qa_browser_e2e.py`、`tests/content_e2e.py`、`tests/workspace_e2e.py` 与 `tests/degraded_e2e.py` 是无头 Chrome 验收脚本（需要后端 8000 与 Chrome 9222）。会员的 MySQL 集成测试与浏览器验收配置见 [会员验收指南](docs/stripe-membership.md)。总结流与等高工作台验收：
 
 ```powershell
 cd backend

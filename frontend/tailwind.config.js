@@ -29,7 +29,7 @@ export default {
           400: '#94a3b8',
           300: '#cbd5e1',
         },
-        canvas: '#f6f7fb',
+        canvas: '#f6f4ef',
       },
       fontFamily: {
         sans: [

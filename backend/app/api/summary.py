@@ -5,8 +5,11 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from app.deps import client_ip, enforce_rate
+from app.membership.auth import signed_in_user
 from app.security import SlidingWindowLimiter, UnsafeUrlError, validate_public_url
 from app.services.summary import exporters
 from app.services.summary.errors import (
@@ -84,10 +87,12 @@ async def create_summary(payload: SummaryRequest, request: Request) -> SummaryCr
 
     enforce_rate(summary_limiter, request, "AI 总结请求")
     try:
+        user = await run_in_threadpool(signed_in_user, request)
         task, cached = await summary_manager.create(
             url,
             client_ip(request),
             force=payload.force,
+            member_user_id=user.id if user else None,
         )
     except SummaryDisabledError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -95,6 +100,8 @@ async def create_summary(payload: SummaryRequest, request: Request) -> SummaryCr
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except SummaryValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SQLAlchemyError:
+        raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("创建 AI 总结任务失败")
         raise HTTPException(status_code=500, detail=f"创建 AI 总结任务失败：{exc}") from exc
